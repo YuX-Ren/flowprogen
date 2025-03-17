@@ -112,8 +112,8 @@ set_seed()
 
 # 初始化 wandb
 wandb.init(
-    project="dillm-flowers",  # 项目名称
-    name="flowers-training",      # 实验名称
+    project="dillm",  # 项目名称
+    name="train_latent_only_dillm",      # 实验名称
     config={
         "learning_rate": 1e-6,
         "weight_decay": 1e-7,
@@ -198,7 +198,7 @@ dataloader = DataLoader(dataset, batch_size = 4, shuffle = True)
 iter_dl = cycle(dataloader)
 
 # 使用 AdamW 优化器，并设置较小的学习率和权重衰减
-optimizer = AdamW(model.parameters(), lr = 1e-5, weight_decay=1e-7, eps=1e-8)
+optimizer = AdamW(model.parameters(), lr = 1e-4, weight_decay=1e-2, eps=1e-8)
 for param_group in optimizer.param_groups:
     for param in param_group['params']:
         param.data = param.data.to(torch.float32)

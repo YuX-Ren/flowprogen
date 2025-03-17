@@ -20,10 +20,33 @@ from torchvision.utils import save_image
 
 from dillm import LLMfusion, print_modality_sample
 
+import wandb
+
 # hf related
 
 from datasets import load_dataset
 from diffusers.models import AutoencoderKL
+
+
+# 设置随机种子，提高实验可重复性
+def set_seed(seed=42):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    import numpy as np
+    np.random.seed(seed)
+    import random
+    random.seed(seed)
+
+set_seed()
+
+# 初始化 wandb
+wandb.init(
+    project="dillm", 
+    name="train_latent_with_text_dillm",
+)
+
 
 vae = AutoencoderKL.from_pretrained("/share/project/xiaohongwang/LLM_checkpoints/stable-diffusion-v1-4", subfolder = "vae")
 # vae = AutoencoderKL.from_pretrained(
@@ -149,6 +172,7 @@ model = LLMfusion(
     ),
     add_pos_emb = False,
     modality_num_dim = 2,
+    fallback_to_default_shape_if_invalid = True,
     reconstruction_loss_weight = 0.1,
     transformer={
         'use_llama': True,
@@ -197,7 +221,7 @@ dataloader = model.create_dataloader(dataset, batch_size = 1, shuffle = True)
 iter_dl = cycle(dataloader)
 
 # optimizer = Adam(model.parameters(), lr = 8e-4)
-optimizer = AdamW(model.parameters(), lr = 1e-6, weight_decay=1e-7, eps=1e-8)
+optimizer = AdamW(model.parameters(), lr = 8e-4, weight_decay=1e-2, eps=1e-8)
 for param_group in optimizer.param_groups:
     for param in param_group['params']:
         param.data = param.data.to(torch.float32)
@@ -207,7 +231,7 @@ scaler = GradScaler()
 
 # train loop
 
-for step in range(1, 100_000 + 1):
+for step in range(1, 10_000 + 1):
     optimizer.zero_grad()  # Zero gradients at the start of each step
     
     for _ in range(4):
@@ -237,6 +261,7 @@ for step in range(1, 100_000 + 1):
 
     ema_model.update()
 
+    wandb.log({"loss": loss.item()}, step=step)
     print(f'{step}: {loss.item():.3f}')
 
     if divisible_by(step, SAMPLE_EVERY):
@@ -270,6 +295,8 @@ for step in range(1, 100_000 + 1):
                 image.detach().cpu(),
                 filename
             )
+            
+            # wandb.log({"image": wandb.Image(image.detach().cpu(), caption=text)}, step=step)
             
             # Clear memory after saving
             del image

@@ -5,3 +5,6 @@
 
 ## Usage
 
+train_image_only_dillm.py
+train_latent_only_dillm.py
+train_latent_with_text_dillm.py

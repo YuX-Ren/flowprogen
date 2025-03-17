@@ -1,3 +1,5 @@
+# type: ignore
+
 from __future__ import annotations
 
 """
@@ -1669,12 +1671,12 @@ class LLMfusion(Module):
         self,
         prompt: ModalitySample | Tensor | tuple[int, Float['...']] | None = None,
         max_length = 2048,
-        text_temperature = 1.5,
+        text_temperature = 0.2,
         text_min_p = 0.1,
         cache_kv = False,
         fixed_modality_shape: tuple[int, ...] | None = None,
         init_modality_noise: Float['n d'] | None = None,
-        modality_steps = 16,
+        modality_steps = 32,
         return_unprocessed_modalities = False
     ) -> ModalitySample:
 
