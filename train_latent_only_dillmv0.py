@@ -7,6 +7,7 @@ from torch.nn import Module
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.nn.utils import clip_grad_norm_
 from torch.amp import GradScaler,autocast
 from einops import rearrange
 
@@ -143,7 +144,7 @@ for step in range(1, 100_000 + 1):
         torch.cuda.empty_cache()
 
     scaler.unscale_(optimizer)
-    torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
+    clip_grad_norm_(model.parameters(), 0.5)
 
     scaler.step(optimizer)
     scaler.update()

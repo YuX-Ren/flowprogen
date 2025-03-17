@@ -16,8 +16,8 @@ from torchvision.utils import save_image
 
 from dillm import LLMfusion, print_modality_sample
 
-rmtree('./results_dillm/train_image_only_dillm', ignore_errors = True)
-results_folder = Path('./results_dillm/train_image_only_dillm')
+rmtree('./results_dillm/train_image_only_dillmv2', ignore_errors = True)
+results_folder = Path('./results_dillm/train_image_only_dillmv2')
 results_folder.mkdir(exist_ok = True, parents = True)
 device = torch.device('cuda:0')
 
@@ -103,8 +103,8 @@ for step in range(1, 100_000 + 1):
     clip_grad_norm_(model.parameters(), 0.5)
 
     optimizer.step()
-    scheduler.step()
     optimizer.zero_grad()
+    scheduler.step()
 
     ema_model.update()
 

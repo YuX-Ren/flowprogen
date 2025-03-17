@@ -1696,7 +1696,7 @@ class LLMfusion(Module):
 
         if is_tensor(prompt) and prompt.dtype in (torch.int, torch.long): # is text only prompt
             prompt = [prompt]
-
+        import pdb;pdb.set_trace()
         elif isinstance(prompt, tuple):
             modality_type, modality = prompt
 
