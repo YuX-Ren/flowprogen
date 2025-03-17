@@ -21,7 +21,8 @@ from datasets import load_dataset
 from diffusers.models import AutoencoderKL
 
 vae = AutoencoderKL.from_pretrained("/share/project/xiaohongwang/LLM_checkpoints/stable-diffusion-v1-4", subfolder = "vae")
-device = torch.device('cuda:0')
+# device = torch.device('cuda:0')
+device = "cuda" if torch.cuda.is_available() else "cpu"
 vae.to(device)
 
 class Encoder(Module):
@@ -50,8 +51,8 @@ class Decoder(Module):
 
 # results folder
 
-rmtree('./results_dillm/train_latent_only_dillmv2', ignore_errors = True)
-results_folder = Path('./results_dillm/train_latent_only_dillmv2')
+rmtree('./results_dillm/train_latent_only_dillmv0', ignore_errors = True)
+results_folder = Path('./results_dillm/train_latent_only_dillmv0')
 results_folder.mkdir(exist_ok = True, parents = True)
 
 # constants
