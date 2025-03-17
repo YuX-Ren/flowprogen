@@ -167,3 +167,4 @@ MNIST
 wandb
 checkpoints*
 transfusion-pytorch
+results*

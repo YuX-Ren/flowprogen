@@ -50,8 +50,8 @@ class Decoder(Module):
 
 # results folder
 
-rmtree('./results/train_latent_only_dillmv2', ignore_errors = True)
-results_folder = Path('./results/train_latent_only_dillmv2')
+rmtree('./results_dillm/train_latent_only_dillmv2', ignore_errors = True)
+results_folder = Path('./results_dillm/train_latent_only_dillmv2')
 results_folder.mkdir(exist_ok = True, parents = True)
 
 # constants
