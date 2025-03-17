@@ -6,6 +6,7 @@ from torch import tensor
 from torch.nn import Module
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam, AdamW
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.amp import GradScaler,autocast
 from einops import rearrange
 
@@ -21,8 +22,8 @@ from datasets import load_dataset
 from diffusers.models import AutoencoderKL
 
 vae = AutoencoderKL.from_pretrained("/share/project/xiaohongwang/LLM_checkpoints/stable-diffusion-v1-4", subfolder = "vae")
-# device = torch.device('cuda:0')
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device = torch.device('cuda:0')
+# device = "cuda" if torch.cuda.is_available() else "cpu"
 vae.to(device)
 
 class Encoder(Module):
@@ -57,7 +58,7 @@ results_folder.mkdir(exist_ok = True, parents = True)
 
 # constants
 
-SAMPLE_EVERY = 50
+SAMPLE_EVERY = 100
 
 # functions
 
@@ -117,17 +118,18 @@ dataloader = DataLoader(dataset, batch_size = 4, shuffle = True)
 
 iter_dl = cycle(dataloader)
 
-optimizer = AdamW(model.parameters(), lr = 8e-4, weight_decay=1e-2, eps=1e-8)
+# optimizer = AdamW(model.parameters(), lr = 8e-4, weight_decay=1e-2, eps=1e-8)
+optimizer = AdamW(model.parameters(), lr = 2e-4)
 for param_group in optimizer.param_groups:
     for param in param_group['params']:
         param.data = param.data.to(torch.float32)
 scaler = GradScaler()
 # train loop
-
+scheduler = CosineAnnealingLR(optimizer, T_max=100000, eta_min=1e-6)
 for step in range(1, 100_000 + 1):
-
+    model.train()
     for _ in range(4):
-        with autocast('cuda', dtype=torch.float16):
+        with autocast('cuda'):
             loss = model.forward_modality(next(iter_dl))
             loss = loss / 4
         
@@ -145,6 +147,8 @@ for step in range(1, 100_000 + 1):
 
     scaler.step(optimizer)
     scaler.update()
+    optimizer.zero_grad()
+    scheduler.step()
 
     ema_model.update()
 
