@@ -22,10 +22,10 @@ from torchvision.utils import save_image
 
 from dillm import LLMfusion, print_modality_sample
 
+import json
 import wandb
-
+from PIL import Image
 # hf related
-
 from datasets import load_dataset
 from diffusers.models import AutoencoderKL
 
@@ -98,8 +98,8 @@ class Decoder(Module):
 
 # results folder
 
-rmtree('./results_dillm/train_latent_with_text_dillmv2', ignore_errors = True)
-results_folder = Path('./results_dillm/train_latent_with_text_dillmv2')
+rmtree('./results_dillm/train_latent_with_text_dillmv2-cc3m', ignore_errors = True)
+results_folder = Path('./results_dillm/train_latent_with_text_dillmv2-cc3m')
 results_folder.mkdir(exist_ok = True, parents = True)
 
 # constants
@@ -187,6 +187,30 @@ model = LLMfusion(
 
 ema_model = model.create_ema(0.9)
 
+class CC3MDataset(Dataset):
+    def __init__(self, image_size):
+        # self.ds = load_dataset("imagefolder", data_dir = "/share/project/public_datasets/public_natural_images/CC3M/conceptual-captions/val_image")['train']
+        with open("/share/project/public_datasets/public_natural_images/CC3M/conceptual-captions/val_label.json", 'r') as f:
+            self.content = [json.loads(line) for line in f]
+
+        self.transform = T.Compose([
+            T.Resize((image_size, image_size)),
+            T.PILToTensor(),
+            T.Lambda(lambda t: t / 255.)
+        ])
+
+    def __len__(self):
+        return len(self.content)
+
+    def __getitem__(self, idx):
+        content_info = self.content[idx]
+        image_path = os.path.join("/share/project/public_datasets/public_natural_images/CC3M/conceptual-captions/val_image", os.path.basename(content_info['image'].split("@/")[-1]))  # 获取文件名
+        pil = Image.open(image_path).convert("RGB")
+        labels_text = " ".join(content_info['caption'])
+        tensor = self.transform(pil)
+        return encode_tokens(labels_text), tensor
+    
+
 class FlowersDataset(Dataset):
     def __init__(self, image_size):
         self.ds = load_dataset("nelorth/oxford-flowers")['train']
@@ -215,7 +239,8 @@ def cycle(iter_dl):
         for batch in iter_dl:
             yield batch
 
-dataset = FlowersDataset(512)
+# dataset = FlowersDataset(512)
+dataset = CC3MDataset(512)
 
 # Use custom collate function instead of model.create_dataloader
 dataloader = model.create_dataloader(dataset, batch_size = 2, shuffle = True)
@@ -295,7 +320,8 @@ for step in range(1, 10_000 + 1):
             text_tensor = text_tensor[text_tensor < 256]
 
             text = decode_tokens(text_tensor)
-            filename = str(results_folder / f'{step}.{text}.png')
+            print(f'{step}: {text}')
+            filename = str(results_folder / f'{step}.png')
 
             save_image(
                 image.detach().cpu(),
