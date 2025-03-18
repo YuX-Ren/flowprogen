@@ -51,7 +51,7 @@ set_seed()
 # 初始化 wandb
 wandb.init(
     project="dillm", 
-    name="train_latent_with_text_dillm_prot",
+    name="train_latent_only_dillm_prot",
 )
 
 
@@ -103,8 +103,8 @@ vae.to(device)
 
 # results folder
 
-rmtree('./results_dillm/train_latent_with_text_dillmv2-prot', ignore_errors = True)
-results_folder = Path('./results_dillm/train_latent_with_text_dillmv2-prot')
+rmtree('./results_dillm/train_latent_only_dillm_prot', ignore_errors = True)
+results_folder = Path('./results_dillm/train_latent_only_dillm_prot')
 results_folder.mkdir(exist_ok = True, parents = True)
 
 # constants
@@ -439,7 +439,7 @@ for step in range(1, 100_000 + 1):
             ema_model.to(torch.float32)
             
             # Sample from the model
-            z = torch.randn(2, 512, 32).to(device)  # [batch, length, latent_dim]
+            # z = torch.randn(2, 512, 32).to(device)  # [batch, length, latent_dim]
             # seq_logits, coords = ema_model.modality_decoder(z)
             seq_logits, coords_tensor = ema_model.generate_modality_only(
                 batch_size=1,
@@ -459,5 +459,5 @@ for step in range(1, 100_000 + 1):
                 save_protein_structure(filename, seq, coord)
                 print(f"Generated sequence {i}: {seq[:50]}...")
             
-            torch.cuda.empty_cache()
+        torch.cuda.empty_cache()
 

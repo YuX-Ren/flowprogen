@@ -1977,7 +1977,6 @@ class LLMfusion(Module):
         coord_tensor: Float['b n 3'],
         return_loss = True
     ):
-        """蛋白质专用前向传播"""
         # Iterate over the modality_encoder if it's a ModuleList
         if isinstance(self.modality_encoder, ModuleList):
             z, mu, logvar = [], [], []
