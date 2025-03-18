@@ -1331,7 +1331,7 @@ class LLMfusion(Module):
         self,
         *,
         num_text_tokens,
-        transformer: dict | Transformer | LlamaTransformer,  # 添加 LlamaTransformer 支持
+        transformer: dict | LlamaTransformer,  # 添加 LlamaTransformer 支持
         dim_latent: int | tuple[int, ...] | None = None,
         channel_first_latent: bool | tuple[bool, ...] = False,
         add_pos_emb: bool | tuple[bool, ...] = False,
@@ -1696,7 +1696,7 @@ class LLMfusion(Module):
 
         if is_tensor(prompt) and prompt.dtype in (torch.int, torch.long): # is text only prompt
             prompt = [prompt]
-        import pdb;pdb.set_trace()
+        
         elif isinstance(prompt, tuple):
             modality_type, modality = prompt
 
