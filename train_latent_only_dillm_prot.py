@@ -375,7 +375,7 @@ dataloader = DataLoader(
 )
 iter_dl = cycle(dataloader)
 
-optimizer = AdamW(model.parameters(), lr = 2e-4)
+optimizer = AdamW(model.parameters(), lr = 2e-5)
 for param_group in optimizer.param_groups:
     for param in param_group['params']:
         param.data = param.data.to(torch.float32)
@@ -387,25 +387,28 @@ scaler = GradScaler()
 scheduler = CosineAnnealingLR(optimizer, T_max=100_000, eta_min=1e-6)
 
 # Training loop
-for step in range(1, 10_000 + 1):
+for step in range(1, 100_000 + 1):
     model.train()
     
     for _ in range(4):
         with autocast('cuda'):
             # Get batch
             seq_tensor, coords_tensor = next(iter_dl)
-            print(seq_tensor, coords_tensor)
             seq_tensor, coords_tensor = seq_tensor.to(device), coords_tensor.to(device)
             
             # Forward pass
-            z, mu, logvar = model.modality_encoder(seq_tensor, coords_tensor)
-            seq_logits, coords_pred = model.modality_decoder(z)
+            # z, mu, logvar = model.modality_encoder(seq_tensor, coords_tensor)
+            # seq_logits, coords_pred = model.modality_decoder(z)
+            # recon_loss = protein_reconstruction_loss(seq_logits, coords_pred, seq_tensor, coords_tensor)
+            # kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
             
-            # Calculate losses
-            recon_loss = protein_reconstruction_loss(seq_logits, coords_pred, seq_tensor, coords_tensor)
-            kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-            
-            loss = recon_loss + 0.1 * kl_loss
+            # loss = recon_loss + 0.1 * kl_loss
+            loss, (recon_loss, kl_loss) = model.forward_protein(
+                    seq_tensor,
+                    coords_tensor,
+                    return_loss=True
+                )
+            # # Calculate losses
             loss = loss / 4
         
         scaler.scale(loss).backward()
@@ -437,14 +440,21 @@ for step in range(1, 10_000 + 1):
             
             # Sample from the model
             z = torch.randn(2, 512, 32).to(device)  # [batch, length, latent_dim]
-            seq_logits, coords = ema_model.modality_decoder(z)
-            
+            # seq_logits, coords = ema_model.modality_decoder(z)
+            seq_logits, coords_tensor = ema_model.generate_modality_only(
+                batch_size=1,
+                modality_type=0,
+                modality_steps=100,
+                return_unprocessed_modalities=True
+            )
+            # print(seq_logits.shape, coords_tensor.shape) #torch.Size([1, 512, 20]) torch.Size([1, 512, 3])
             # Convert to amino acid sequence
             seq_pred = torch.argmax(seq_logits, dim=-1)
-            sequences = [''.join([dataset.aa_vocab[i.item()] for i in seq]) for seq in seq_pred]
+            print(seq_pred)
+            sequences = [''.join([dataset.aa_vocab.get(i.item(), 'X') for i in seq]) for seq in seq_pred]
             
             # Save generated sequences and coordinates
-            for i, (seq, coord) in enumerate(zip(sequences, coords)):
+            for i, (seq, coord) in enumerate(zip(sequences, coords_tensor)):
                 filename = str(results_folder / f'{step}_sample_{i}.pdb')
                 save_protein_structure(filename, seq, coord)
                 print(f"Generated sequence {i}: {seq[:50]}...")

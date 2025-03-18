@@ -1422,14 +1422,32 @@ class LLMfusion(Module):
 
         # modality encoders and decoders
 
-        modality_encoder = cast_tuple(modality_encoder, 1 if exists(modality_encoder) else self.num_modalities)
-        modality_decoder = cast_tuple(modality_decoder, 1 if exists(modality_decoder) else self.num_modalities)
+        # modality_encoder = cast_tuple(modality_encoder, 1 if exists(modality_encoder) else self.num_modalities)
+        # modality_decoder = cast_tuple(modality_decoder, 1 if exists(modality_decoder) else self.num_modalities)
 
-        self.modality_encoder = ModuleList(modality_encoder)
-        self.modality_decoder = ModuleList(modality_decoder)
+        # self.modality_encoder = ModuleList(modality_encoder)
+        # self.modality_decoder = ModuleList(modality_decoder)
+        # 修改1: 正确处理单模态编码器/解码器
+        if isinstance(modality_encoder, Module):
+            self.modality_encoder = ModuleList([modality_encoder])
+        else:
+            self.modality_encoder = ModuleList(modality_encoder or [])
 
-        assert len(self.modality_encoder) == self.num_modalities
-        assert len(self.modality_decoder) == self.num_modalities
+        if isinstance(modality_decoder, Module):
+            self.modality_decoder = ModuleList([modality_decoder])
+        else:
+            self.modality_decoder = ModuleList(modality_decoder or [])
+
+        # 确保编码器/解码器数量匹配
+        assert len(self.modality_encoder) == self.num_modalities, \
+            f"Expected {self.num_modalities} encoders, got {len(self.modality_encoder)}"
+        assert len(self.modality_decoder) == self.num_modalities, \
+            f"Expected {self.num_modalities} decoders, got {len(self.modality_decoder)}"
+
+        # 修改2: 单模态专用处理
+        if self.num_modalities == 1:
+            self.single_modality_encoder = self.modality_encoder[0]
+            self.single_modality_decoder = self.modality_decoder[0]
 
         # auto handle batch dimension for modality encoder / decoder
 
@@ -1658,7 +1676,8 @@ class LLMfusion(Module):
             forward_method_names = (
                 'sample',
                 'generate_text_only',
-                'generate_modality_only'
+                'generate_modality_only',
+                'generate_protein'
             )
         )
 
@@ -1937,7 +1956,64 @@ class LLMfusion(Module):
                 modality_sample = apply_fn_modality_type(decoder_fn, modality_sample, modality_type = mod.modality_type)
 
         return modality_sample
+    
+    def protein_reconstruction_loss(self, seq_logits, coords_pred, seq_target, coords_target):
+        """Calculate reconstruction loss for both sequence and structure"""
+        # Sequence loss (cross entropy)
+        seq_loss = F.cross_entropy(seq_logits.view(-1, 20), seq_target.view(-1))
+        
+        # Coordinate loss (MSE)
+        coord_loss = F.mse_loss(coords_pred, coords_target)
+        
+        # RMSD loss for overall structure quality
+        rmsd_loss = torch.sqrt(((coords_pred - coords_target) ** 2).sum(dim=-1)).mean()
+        
+        return seq_loss + coord_loss + 0.1 * rmsd_loss
 
+    @typecheck
+    def forward_protein(
+        self,
+        seq_tensor: Int['b n'],
+        coord_tensor: Float['b n 3'],
+        return_loss = True
+    ):
+        """蛋白质专用前向传播"""
+        # Iterate over the modality_encoder if it's a ModuleList
+        if isinstance(self.modality_encoder, ModuleList):
+            z, mu, logvar = [], [], []
+            for encoder in self.modality_encoder:
+                z_i, mu_i, logvar_i = encoder(seq_tensor, coord_tensor)
+                z.append(z_i)
+                mu.append(mu_i)
+                logvar.append(logvar_i)
+            # Concatenate results
+            z = torch.cat(z, dim=1)
+            mu = torch.cat(mu, dim=1)
+            logvar = torch.cat(logvar, dim=1)
+        else:
+            z, mu, logvar = self.modality_encoder(seq_tensor, coord_tensor)
+
+        # Iterate over the modality_decoder if it's a ModuleList
+        if isinstance(self.modality_decoder, ModuleList):
+            seq_logits, coords_pred = [], []
+            for decoder in self.modality_decoder:
+                seq_logits_i, coords_pred_i = decoder(z)
+                seq_logits.append(seq_logits_i)
+                coords_pred.append(coords_pred_i)
+            # Concatenate results
+            seq_logits = torch.cat(seq_logits, dim=1)
+            coords_pred = torch.cat(coords_pred, dim=1)
+        else:
+            seq_logits, coords_pred = self.modality_decoder(z)
+        
+        if not return_loss:
+            return (seq_logits, coords_pred), (mu, logvar)
+            
+        recon_loss = self.protein_reconstruction_loss(seq_logits, coords_pred, seq_tensor, coord_tensor)
+        kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+        loss = recon_loss + 0.1 * kl_loss
+        return loss, (recon_loss, kl_loss)
+    
     @typecheck
     def forward_text(
         self,
@@ -2212,6 +2288,64 @@ class LLMfusion(Module):
 
             flow = self.forward_modality(
                 denoised,
+                times = step_times,
+                modality_type = modality_type,
+                encode_modality = False,
+                return_loss = False
+            )
+
+            return flow
+
+        times = torch.linspace(0., 1., modality_steps, device = device)
+        trajectory = self.odeint_fn(ode_step_fn, noise, times)
+
+        # add the sampled modality tokens
+
+        sampled_modality = trajectory[-1]
+
+        # decode
+
+        if exists(mod.decoder):
+            mod.decoder.eval()
+            sampled_modality = mod.decoder(sampled_modality)
+
+        return sampled_modality
+
+    @torch.no_grad()
+    @eval_decorator
+    @typecheck
+    def generate_protein(
+        self,
+        batch_size: int = 1,
+        modality_type: int | None = None,
+        fixed_modality_shape: tuple[int, ...] | None = None,
+        modality_steps = 16,
+        return_unprocessed_modalities = False
+    ) -> Tensor:
+
+        device = self.device
+
+        if self.num_modalities > 1:
+            assert exists(modality_type), '`modality_type` must be explicitly passed in on forward when training on greater than 1 modality'
+
+        mod = self.get_modality_info(modality_type)
+
+        modality_shape = default(fixed_modality_shape, mod.default_shape)
+
+        assert exists(modality_shape)
+
+        noise = torch.randn((batch_size, *modality_shape, mod.dim_latent), device = device)
+
+        if mod.channel_first_latent:
+            noise = rearrange(noise, 'b ... d -> b d ...')
+
+        def ode_step_fn(step_times, denoised):
+
+            step_times = repeat(step_times, ' -> b', b = batch_size)
+
+            flow = self.forward_protein(
+                seq_tensor,
+                coord_tensor,
                 times = step_times,
                 modality_type = modality_type,
                 encode_modality = False,
