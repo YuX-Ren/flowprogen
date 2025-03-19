@@ -375,7 +375,7 @@ dataloader = DataLoader(
 )
 iter_dl = cycle(dataloader)
 
-optimizer = AdamW(model.parameters(), lr = 2e-5)
+optimizer = AdamW(model.parameters(), lr = 2e-3)
 for param_group in optimizer.param_groups:
     for param in param_group['params']:
         param.data = param.data.to(torch.float32)
