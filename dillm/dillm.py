@@ -2012,7 +2012,65 @@ class LLMfusion(Module):
         kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
         loss = recon_loss + 0.1 * kl_loss
         return loss, (recon_loss, kl_loss)
-    
+
+    @torch.no_grad()
+    @eval_decorator
+    @typecheck
+    def generate_protein(
+        self,
+        batch_size: int = 1,
+        modality_type: int | None = None,
+        fixed_modality_shape: tuple[int, ...] | None = None,
+        modality_steps = 16,
+        return_unprocessed_modalities = False
+    ) -> Tensor:
+
+        device = self.device
+
+        if self.num_modalities > 1:
+            assert exists(modality_type), '`modality_type` must be explicitly passed in on forward when training on greater than 1 modality'
+
+        mod = self.get_modality_info(modality_type)
+
+        modality_shape = default(fixed_modality_shape, mod.default_shape)
+
+        assert exists(modality_shape)
+
+        noise = torch.randn((batch_size, *modality_shape, mod.dim_latent), device = device)
+
+        if mod.channel_first_latent:
+            noise = rearrange(noise, 'b ... d -> b d ...')
+
+        def ode_step_fn(step_times, denoised):
+
+            step_times = repeat(step_times, ' -> b', b = batch_size)
+
+            flow = self.forward_protein(
+                seq_tensor,
+                coord_tensor,
+                times = step_times,
+                modality_type = modality_type,
+                encode_modality = False,
+                return_loss = False
+            )
+
+            return flow
+
+        times = torch.linspace(0., 1., modality_steps, device = device)
+        trajectory = self.odeint_fn(ode_step_fn, noise, times)
+
+        # add the sampled modality tokens
+
+        sampled_modality = trajectory[-1]
+
+        # decode
+
+        if exists(mod.decoder):
+            mod.decoder.eval()
+            sampled_modality = mod.decoder(sampled_modality)
+
+        return sampled_modality
+
     @typecheck
     def forward_text(
         self,
@@ -2117,6 +2175,7 @@ class LLMfusion(Module):
     ) -> Scalar | Float['b ...']:
         requires_velocity_consistency = exists(velocity_consistency_ema_model)
 
+        print(modalities)
         modalities = modalities.to(self.device)
         orig_modalities = modalities
 
@@ -2310,64 +2369,67 @@ class LLMfusion(Module):
 
         return sampled_modality
 
-    @torch.no_grad()
-    @eval_decorator
     @typecheck
-    def generate_protein(
+    def forward_seq_coord(
         self,
-        batch_size: int = 1,
+        seq_tensor: Int['b n'],
+        coord_tensor: Float['b n 3'],
+        times: Float['b'] | None = None,
         modality_type: int | None = None,
-        fixed_modality_shape: tuple[int, ...] | None = None,
-        modality_steps = 16,
-        return_unprocessed_modalities = False
-    ) -> Tensor:
-
-        device = self.device
-
-        if self.num_modalities > 1:
-            assert exists(modality_type), '`modality_type` must be explicitly passed in on forward when training on greater than 1 modality'
-
-        mod = self.get_modality_info(modality_type)
-
-        modality_shape = default(fixed_modality_shape, mod.default_shape)
-
-        assert exists(modality_shape)
-
-        noise = torch.randn((batch_size, *modality_shape, mod.dim_latent), device = device)
-
-        if mod.channel_first_latent:
-            noise = rearrange(noise, 'b ... d -> b d ...')
-
-        def ode_step_fn(step_times, denoised):
-
-            step_times = repeat(step_times, ' -> b', b = batch_size)
-
-            flow = self.forward_protein(
-                seq_tensor,
-                coord_tensor,
-                times = step_times,
-                modality_type = modality_type,
-                encode_modality = False,
-                return_loss = False
+        return_loss = True,
+        return_loss_breakdown = False
+    ) -> Scalar | tuple:
+        """
+        Forward pass for protein sequence and coordinate data.
+        This method handles the encoding of protein data and flow matching training.
+        
+        Args:
+            seq_tensor: Tensor of amino acid sequence indices [batch, seq_len]
+            coord_tensor: Tensor of 3D coordinates [batch, seq_len, 3]
+            times: Optional time values for the flow matching process [batch]
+            modality_type: Modality type index (default: 0)
+            return_loss: Whether to return the loss
+            return_loss_breakdown: Whether to return a breakdown of loss components
+            
+        Returns:
+            Loss value or tuple of outputs depending on parameters
+        """
+        batch, device = seq_tensor.shape[0], seq_tensor.device
+        
+        # 使用 modality_encoder 将序列和坐标编码为潜在表示
+        latent, mu, logvar = self.modality_encoder[0](seq_tensor, coord_tensor)
+        
+        # 计算KL散度损失
+        kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=-1).mean()
+        
+        # 将潜在表示输入到flow matching训练中
+        if return_loss:
+            flow_loss = self.forward_modality(
+                modalities=latent,
+                times=times,
+                modality_type=modality_type,
+                encode_modality=False,  # 已经编码过了
+                return_loss=True,
+                return_loss_breakdown=False
             )
-
-            return flow
-
-        times = torch.linspace(0., 1., modality_steps, device = device)
-        trajectory = self.odeint_fn(ode_step_fn, noise, times)
-
-        # add the sampled modality tokens
-
-        sampled_modality = trajectory[-1]
-
-        # decode
-
-        if exists(mod.decoder):
-            mod.decoder.eval()
-            sampled_modality = mod.decoder(sampled_modality)
-
-        return sampled_modality
-
+            
+            # 计算总损失
+            total_loss = flow_loss + 0.01 * kl_loss
+            
+            if not return_loss_breakdown:
+                return total_loss
+            
+            return total_loss, (flow_loss, kl_loss)
+        else:
+            # 用于生成（推理）
+            return self.forward_modality(
+                modalities=latent,
+                times=times,
+                modality_type=modality_type,
+                encode_modality=False,
+                return_loss=False
+            )
+        
     @typecheck
     def forward(
         self,
@@ -3012,3 +3074,5 @@ class LLMfusion(Module):
             return total_loss
 
         return total_loss, LossBreakdown(total_loss, text_loss, flow_losses, velocity_match_losses, recon_losses)
+
+
