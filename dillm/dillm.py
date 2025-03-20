@@ -1974,14 +1974,14 @@ class LLMfusion(Module):
     def forward_protein(
         self,
         seq_tensor: Int['b n'],
-        coord_tensor: Float['b n 3'],
+        coords_tensor: Float['b n 3'],
         return_loss = True
     ):
         # Iterate over the modality_encoder if it's a ModuleList
         if isinstance(self.modality_encoder, ModuleList):
             z, mu, logvar = [], [], []
             for encoder in self.modality_encoder:
-                z_i, mu_i, logvar_i = encoder(seq_tensor, coord_tensor)
+                z_i, mu_i, logvar_i = encoder(seq_tensor, coords_tensor)
                 z.append(z_i)
                 mu.append(mu_i)
                 logvar.append(logvar_i)
@@ -1990,7 +1990,7 @@ class LLMfusion(Module):
             mu = torch.cat(mu, dim=1)
             logvar = torch.cat(logvar, dim=1)
         else:
-            z, mu, logvar = self.modality_encoder(seq_tensor, coord_tensor)
+            z, mu, logvar = self.modality_encoder(seq_tensor, coords_tensor)
 
         # Iterate over the modality_decoder if it's a ModuleList
         if isinstance(self.modality_decoder, ModuleList):
@@ -2008,7 +2008,7 @@ class LLMfusion(Module):
         if not return_loss:
             return (seq_logits, coords_pred), (mu, logvar)
             
-        recon_loss = self.protein_reconstruction_loss(seq_logits, coords_pred, seq_tensor, coord_tensor)
+        recon_loss = self.protein_reconstruction_loss(seq_logits, coords_pred, seq_tensor, coords_tensor)
         kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
         loss = recon_loss + 0.1 * kl_loss
         return loss, (recon_loss, kl_loss)
@@ -2047,7 +2047,7 @@ class LLMfusion(Module):
 
             flow = self.forward_protein(
                 seq_tensor,
-                coord_tensor,
+                coords_tensor,
                 times = step_times,
                 modality_type = modality_type,
                 encode_modality = False,
@@ -2174,8 +2174,6 @@ class LLMfusion(Module):
         return_loss_breakdown = False
     ) -> Scalar | Float['b ...']:
         requires_velocity_consistency = exists(velocity_consistency_ema_model)
-
-        print(modalities)
         modalities = modalities.to(self.device)
         orig_modalities = modalities
 
@@ -2285,7 +2283,7 @@ class LLMfusion(Module):
         recon_loss = self.zero
 
         if self.has_recon_loss:
-            assert encode_modality
+            # assert encode_modality
 
             recon = noise + pred_flow * (1. - padded_times)
 
@@ -2294,10 +2292,17 @@ class LLMfusion(Module):
                     mod.decoder.eval()
                     recon = mod.decoder(recon)
 
-            recon_loss = F.mse_loss(
-                recon,
-                orig_modalities
-            )
+            if isinstance(recon, tuple):
+                seq_logits, coords_pred = recon
+                recon_loss = F.mse_loss(
+                    seq_logits,
+                    orig_modalities
+                )
+            else:
+                recon_loss = F.mse_loss(
+                    recon,
+                    orig_modalities
+                )
 
         # total loss
 
@@ -2323,7 +2328,7 @@ class LLMfusion(Module):
         modality_steps = 16,
         return_unprocessed_modalities = False
     ) -> Tensor:
-
+        
         device = self.device
 
         if self.num_modalities > 1:
@@ -2366,14 +2371,16 @@ class LLMfusion(Module):
         if exists(mod.decoder):
             mod.decoder.eval()
             sampled_modality = mod.decoder(sampled_modality)
-
+            if isinstance(sampled_modality, tuple):
+                seq_logits, coords_pred = sampled_modality
+                return seq_logits, coords_pred
         return sampled_modality
 
     @typecheck
     def forward_seq_coord(
         self,
         seq_tensor: Int['b n'],
-        coord_tensor: Float['b n 3'],
+        coords_tensor: Float['b n 3'],
         times: Float['b'] | None = None,
         modality_type: int | None = None,
         return_loss = True,
@@ -2385,7 +2392,7 @@ class LLMfusion(Module):
         
         Args:
             seq_tensor: Tensor of amino acid sequence indices [batch, seq_len]
-            coord_tensor: Tensor of 3D coordinates [batch, seq_len, 3]
+            coords_tensor: Tensor of 3D coordinates [batch, seq_len, 3]
             times: Optional time values for the flow matching process [batch]
             modality_type: Modality type index (default: 0)
             return_loss: Whether to return the loss
@@ -2397,8 +2404,8 @@ class LLMfusion(Module):
         batch, device = seq_tensor.shape[0], seq_tensor.device
         
         # 使用 modality_encoder 将序列和坐标编码为潜在表示
-        latent, mu, logvar = self.modality_encoder[0](seq_tensor, coord_tensor)
-        
+        latent, mu, logvar = self.modality_encoder[0](seq_tensor, coords_tensor)
+
         # 计算KL散度损失
         kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=-1).mean()
         
