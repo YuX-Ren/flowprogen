@@ -44,10 +44,7 @@ config = model_config(
     train=True, 
     low_prec=True
 ) 
-
-# 设置PyTorch内存管理
-# os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
-# torch.backends.cuda.matmul.allow_tf32 = True  # 允许使用TF32（对于Ampere及以上GPU）
+print(config)
 
 # 内存管理函数
 def clear_memory():
