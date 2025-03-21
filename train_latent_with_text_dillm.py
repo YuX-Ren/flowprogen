@@ -18,7 +18,7 @@ import torchvision
 import torchvision.transforms as T
 from torchvision.utils import save_image
 
-from dillm import LLMfusion, print_modality_sample
+from dillm import DiLLM, print_modality_sample
 
 import wandb
 
@@ -159,7 +159,7 @@ def custom_collate_fn(batch):
 # text_decoder = TextIdentityDecoder()
 # modality_decoders = (image_decoder, text_decoder)
 
-model = LLMfusion(
+model = DiLLM(
     num_text_tokens = 256,
     dim_latent = 4,
     channel_first_latent = True,

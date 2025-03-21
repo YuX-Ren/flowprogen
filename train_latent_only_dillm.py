@@ -16,7 +16,7 @@ import torchvision
 import torchvision.transforms as T
 from torchvision.utils import save_image
 
-from dillm import LLMfusion, print_modality_sample
+from dillm import DiLLM, print_modality_sample
 
 # hf related
 
@@ -93,7 +93,7 @@ def divisible_by(num, den):
 
 # encoder / decoder
 
-# 在创建 LLMfusion 模型之前，将默认数据类型设置回 float16
+# 在创建 DiLLM 模型之前，将默认数据类型设置回 float16
 # torch.set_default_dtype(torch.float32)
 
 # 添加梯度缩放器，用于混合精度训练
@@ -121,7 +121,7 @@ wandb.init(
         "scheduler": "OneCycleLR",
         "max_lr": 5e-5,
         "batch_size": 4,
-        "model": "LLMfusion-Llama-1B",
+        "model": "DiLLM-Llama-1B",
         "dataset": "oxford-flowers",
         "image_size": 256,
         "velocity_consistency_loss_weight": 0.01,
@@ -134,7 +134,7 @@ wandb.init(
 # 创建一个 float32 版本的模型，用于训练
 # torch.set_default_dtype(torch.float32)
 
-model = LLMfusion(
+model = DiLLM(
     num_text_tokens = 10,
     dim_latent = 4,
     channel_first_latent = True,

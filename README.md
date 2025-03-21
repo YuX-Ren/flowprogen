@@ -1,5 +1,7 @@
 
 ProtFlowLLM: Protein Design Based on Large Language Models and Flow Matching    
+ProtFlowLLM: Controllable Protein Backbone Generation based on Flow Matching and LLM
+
 
 This code is adapted from [Transfusion - Pytorch](https://github.com/lucidrains/transfusion-pytorch), which is a Pytorch implementation of [Transfusion: Predict the Next Token and Diffuse Images with One Multi-Modal Model](https://www.arxiv.org/abs/2408.11039) from Meta AI.
 

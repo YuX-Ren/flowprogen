@@ -1325,7 +1325,7 @@ class LlamaTransformer(Module):
         
         return hidden_states
 
-class LLMfusion(Module):
+class DiLLM(Module):
     @beartype
     def __init__(
         self,
@@ -2035,7 +2035,7 @@ class LLMfusion(Module):
         times: Float['b'] | None = None,
         modality_type: int | None = None,
         encode_modality: bool = True,
-        velocity_consistency_ema_model: LLMfusion | None = None,
+        velocity_consistency_ema_model: DiLLM | None = None,
         velocity_consistency_delta_time = 1e-5,
         return_loss = True,
         return_loss_breakdown = False
@@ -2249,7 +2249,7 @@ class LLMfusion(Module):
         cache: Tensor | None = None,
         decode_length: int | None = None,
         decoding_text_or_modality: Literal['text', 'modality'] | None = None,
-        velocity_consistency_ema_model: LLMfusion | EMA | None = None,
+        velocity_consistency_ema_model: DiLLM | EMA | None = None,
         velocity_consistency_delta_time = 1e-3,
         return_only_pred_flows = False,
         return_loss = True,
@@ -2272,7 +2272,7 @@ class LLMfusion(Module):
         # handle ema model being passed in for velocity consistency loss
 
         if isinstance(velocity_consistency_ema_model, EMA):
-            assert isinstance(velocity_consistency_ema_model.ema_model, LLMfusion)
+            assert isinstance(velocity_consistency_ema_model.ema_model, DiLLM)
             velocity_consistency_ema_model = velocity_consistency_ema_model.ema_model
 
         need_velocity_matching = not is_decoding and exists(velocity_consistency_ema_model)

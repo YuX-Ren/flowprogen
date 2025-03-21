@@ -18,7 +18,7 @@ import torch.nn.functional as F
 
 from einops import rearrange
 
-from dillm import LLMfusion, print_modality_sample
+from dillm import DiLLM, print_modality_sample
 
 # hf related
 from datasets import load_dataset
@@ -103,10 +103,10 @@ def divisible_by(num, den):
     return (num % den) == 0
 
 class ProteinEncoder(ESMFold):
-    def __init__(self, config):
-        super(ProteinEncoder, self).__init__(config)
+    def __init__(self, cfg):
+        super(ProteinEncoder, self).__init__(cfg)
         
-        self.mytrunk = myFoldingTrunk()
+        self.mytrunk = myFoldingTrunk(cfg=config.model.trunk)
         
     def forward(
         self,
@@ -202,8 +202,8 @@ class ProteinEncoder(ESMFold):
         return s_s, s_z
     
 class myFoldingTrunk(FoldingTrunk):
-    def __init__(self, *args, **kwargs):
-        super(myFoldingTrunk, self).__init__(*args, **kwargs)
+    def __init__(self, cfg):
+        super(myFoldingTrunk, self).__init__(cfg)
         
     def forward(self, seq_feats, pair_feats, true_aa, residx, mask, no_recycles: T.Optional[int] = None):
         """
@@ -238,8 +238,8 @@ class myFoldingTrunk(FoldingTrunk):
         return s_s, s_z
 
 class ProteinDecoder(FoldingTrunk):
-    def __init__(self, config):
-        super().__init__()
+    def __init__(self, cfg):
+        super(ProteinDecoder, self).__init__(cfg)
 
     def forward(self, s_s, s_z, batch):
         # === Structure module ===
@@ -352,13 +352,13 @@ def save_protein_structure(filename, sequence, coordinates):
     io.set_structure(structure)
     io.save(filename)
 
-model = LLMfusion(
+model = DiLLM(
     num_text_tokens = 20,  # Number of amino acids
     dim_latent = 20,  # Latent dimension for protein representation
     channel_first_latent = False,  # Protein data is not channel-first
     modality_default_shape = (512,),  # Maximum sequence length
-    modality_encoder = ProteinEncoder(config=config),
-    modality_decoder = ProteinDecoder(config=config),
+    modality_encoder = ProteinEncoder(cfg=config),
+    modality_decoder = ProteinDecoder(cfg=config.model.trunk),
     pre_post_transformer_enc_dec = (
         nn.Linear(20, 2048),  # Adapt latent dimension to transformer dimension
         nn.Linear(2048, 20),

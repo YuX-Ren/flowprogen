@@ -1,5 +1,5 @@
 from dillm.dillm import (
-    LLMfusion,
+    DiLLM,
     print_modality_sample,
     create_dataloader
 )

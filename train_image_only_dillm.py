@@ -14,7 +14,7 @@ import torchvision
 import torchvision.transforms as T
 from torchvision.utils import save_image
 
-from dillm import LLMfusion, print_modality_sample
+from dillm import DiLLM, print_modality_sample
 
 rmtree('./results_dillm/train_image_only_dillmv2', ignore_errors = True)
 results_folder = Path('./results_dillm/train_image_only_dillmv2')
@@ -37,7 +37,7 @@ class Decoder(Module):
     def forward(self, x):
         x = rearrange(x, '... h w (p1 p2) -> ... 1 (h p1) (w p2)', p1 = 2, p2 = 2, h = 14)
         return ((x + 1) * 0.5).clamp(min = 0., max = 1.)
-model = LLMfusion(
+model = DiLLM(
     num_text_tokens = 10,
     dim_latent = 4,
     channel_first_latent = False,

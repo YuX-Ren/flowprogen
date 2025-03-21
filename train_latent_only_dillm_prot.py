@@ -20,7 +20,7 @@ import torchvision
 import torchvision.transforms as T
 from torchvision.utils import save_image
 
-from dillm import LLMfusion, print_modality_sample
+from dillm import DiLLM, print_modality_sample
 
 import json
 import wandb
@@ -213,7 +213,7 @@ class ProteinDecoder(Module):
         
         return seq_logits, coords
 
-model = LLMfusion(
+model = DiLLM(
     num_text_tokens = 20,  # Number of amino acids
     dim_latent = 32,  # Latent dimension for protein representation
     channel_first_latent = False,  # Protein data is not channel-first
