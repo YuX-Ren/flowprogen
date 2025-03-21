@@ -6,8 +6,8 @@ import torch
 import random
 import numpy as np
 import wandb
-import typing as T
 
+import typing as T
 from torch import nn, tensor, Tensor
 from torch.nn import Module
 from torch.utils.data import Dataset, DataLoader
@@ -90,8 +90,8 @@ wandb.init(
     name="train_latent_only_dillm_prot",
 )
 device = torch.device('cuda:0')
-rmtree('./results_dillm/train_latent_only_dillm_protv2', ignore_errors = True)
-results_folder = Path('./results_dillm/train_latent_only_dillm_protv2')
+rmtree('./results_dillm/train_latent_only_dillm_esmfold', ignore_errors = True)
+results_folder = Path('./results_dillm/train_latent_only_dillm_esmfold')
 results_folder.mkdir(exist_ok = True, parents = True)
 
 # constants
