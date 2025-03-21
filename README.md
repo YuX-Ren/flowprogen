@@ -10,12 +10,15 @@ train_latent_only_dillm_esmfold.py
 
 ## Prepare AlphaFlow
 ```
+git clone xxxxx.dillm.git
+cd dillm
 git clone git@github.com:bjing2016/alphaflow.git
 ```
 
 ## Installing OpenFold
 
 ```
+cd dillm
 git clone git@github.com:aqlaboratory/openfold.git
 python setup.py install
 ```
