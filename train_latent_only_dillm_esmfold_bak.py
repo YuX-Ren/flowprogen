@@ -6,7 +6,6 @@ import torch
 import random
 import numpy as np
 import wandb
-import pandas as pd
 
 import typing as T
 from torch import nn, tensor, Tensor
@@ -29,16 +28,13 @@ from Bio import SeqIO
 from Bio.PDB import *
 from Bio.PDB import PDBParser, PDBIO, Polypeptide
 from Bio.PDB.StructureBuilder import StructureBuilder
-import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint
 
 import sys; sys.path.append('.')
 torch.set_float32_matmul_precision("high")
-from dillm.utils.parsing import parse_train_args
-args = parse_train_args()
+from dillm.model.esmfold import ESMFold
+from dillm.model.trunk import FoldingTrunk
 from dillm.config import model_config
 from dillm.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
-from dillm.model.wrapper import ESMFoldWrapper
 
 from openfold.utils.exponential_moving_average import ExponentialMovingAverage
 from openfold.utils.feats import atom14_to_atom37, pseudo_beta_fn
@@ -54,8 +50,6 @@ device = torch.device('cuda:0')
 rmtree(f'./results_dillm/{RUN_NAME}', ignore_errors = True)
 results_folder = Path(f'./results_dillm/{RUN_NAME}')
 results_folder.mkdir(exist_ok = True, parents = True)
-
-
 
 
 # 内存管理函数
@@ -100,6 +94,165 @@ SAMPLE_EVERY = 100
 # functions
 def divisible_by(num, den):
     return (num % den) == 0
+
+class ProteinEncoder(ESMFold):
+    def __init__(self, cfg):
+        super(ProteinEncoder, self).__init__(cfg)
+        
+        self.mytrunk = myFoldingTrunk(cfg.trunk)
+        
+    def forward(
+        self,
+        batch,
+        prev_outputs=None,
+    ):
+        """Runs a forward pass given input tokens. Use `model.infer` to
+        run inference from a sequence.
+
+        Args:
+            aa (torch.Tensor): Tensor containing indices corresponding to amino acids. Indices match
+                openfold.np.residue_constants.restype_order_with_x.
+            mask (torch.Tensor): Binary tensor with 1 meaning position is unmasked and 0 meaning position is masked.
+            residx (torch.Tensor): Residue indices of amino acids. Will assume contiguous if not provided.
+            masking_pattern (torch.Tensor): Optional masking to pass to the input. Binary tensor of the same size
+                as `aa`. Positions with 1 will be masked. ESMFold sometimes produces different samples when
+                different masks are provided.
+            num_recycles (int): How many recycle iterations to perform. If None, defaults to training max
+                recycles, which is 3.
+        """
+
+        aa = batch['aatype']
+        mask = batch['seq_mask']
+        residx = batch['residue_index']
+       
+        # === ESM ===
+        
+        esmaa = self._af2_idx_to_esm_idx(aa, mask)
+        print('esmaa', esmaa.shape)
+        esm_s, _ = self._compute_language_model_representations(esmaa)
+        print('esm_s', esm_s.shape)
+        # Convert esm_s to the precision used by the trunk and
+        # the structure module. These tensors may be a lower precision if, for example,
+        # we're running the language model in fp16 precision.
+        esm_s = esm_s.to(self.esm_s_combine.dtype)
+        esm_s = esm_s.detach()
+
+        # === preprocessing ===
+        esm_s = (self.esm_s_combine.softmax(0).unsqueeze(0) @ esm_s).squeeze(2)
+        s_s_0 = self.esm_s_mlp(esm_s)
+        s_s_0 += self.embedding(aa)
+        #######################
+        if 'noised_pseudo_beta_dists' in batch:
+            inp_z = self._get_input_pair_embeddings(
+                batch['noised_pseudo_beta_dists'], 
+                batch['pseudo_beta_mask']
+            )
+            inp_z = inp_z + self.input_time_embedding(self.input_time_projection(batch['t']))[:,None,None]
+        else: # have to run the module, else DDP wont work
+            B, L = batch['aatype'].shape
+            inp_z = self._get_input_pair_embeddings(
+                s_s_0.new_zeros(B, L, L), 
+                batch['pseudo_beta_mask'] * 0.0
+            )
+            inp_z = inp_z + self.input_time_embedding(self.input_time_projection(inp_z.new_zeros(B)))[:,None,None]
+        ##########################
+        #############################
+        if self.extra_input:
+            if 'extra_all_atom_positions' in batch:
+                extra_pseudo_beta = pseudo_beta_fn(batch['aatype'], batch['extra_all_atom_positions'], None)
+                extra_pseudo_beta_dists = torch.sum((extra_pseudo_beta.unsqueeze(-2) - extra_pseudo_beta.unsqueeze(-3)) ** 2, dim=-1)**0.5
+                extra_inp_z = self._get_extra_input_pair_embeddings(
+                    extra_pseudo_beta_dists, 
+                    batch['pseudo_beta_mask'],
+                )
+                
+            else: # otherwise DDP complains
+                B, L = batch['aatype'].shape
+                extra_inp_z = self._get_extra_input_pair_embeddings(
+                    inp_z.new_zeros(B, L, L), 
+                    inp_z.new_zeros(B, L),
+                ) * 0.0
+    
+            inp_z = inp_z + extra_inp_z
+        ########################
+
+        
+        s_z_0 = inp_z 
+        if prev_outputs is not None:
+            s_s_0 = s_s_0 + self.trunk.recycle_s_norm(prev_outputs['s_s'])
+            s_z_0 = s_z_0 + self.trunk.recycle_z_norm(prev_outputs['s_z'])
+            s_z_0 = s_z_0 + self.trunk.recycle_disto(FoldingTrunk.distogram(
+                prev_outputs['sm']["positions"][-1][:, :, :3],
+                3.375,
+                21.375,
+                self.trunk.recycle_bins,
+            ))
+
+        else:
+            s_s_0 = s_s_0 + self.trunk.recycle_s_norm(torch.zeros_like(s_s_0)) * 0.0
+            s_z_0 = s_z_0 + self.trunk.recycle_z_norm(torch.zeros_like(s_z_0)) * 0.0
+            s_z_0 = s_z_0 + self.trunk.recycle_disto(s_z_0.new_zeros(s_z_0.shape[:-2], dtype=torch.long)) * 0.0
+        
+        s_s, s_z = self.mytrunk(s_s_0, s_z_0, aa, residx, mask, no_recycles=3)
+        return s_s, s_z
+    
+class myFoldingTrunk(FoldingTrunk):
+    def __init__(self, cfg):
+        super(myFoldingTrunk, self).__init__(cfg)
+        
+    def forward(self, seq_feats, pair_feats, true_aa, residx, mask, no_recycles: T.Optional[int] = None):
+        """
+        Inputs:
+          seq_feats:     B x L x C            tensor of sequence features
+          pair_feats:    B x L x L x C        tensor of pair features
+          residx:        B x L                long tensor giving the position in the sequence
+          mask:          B x L                boolean tensor indicating valid residues
+
+        Output:
+          predicted_structure: B x L x (num_atoms_per_residue * 3) tensor wrapped in a Coordinates object
+        """
+
+        device = seq_feats.device
+        s_s_0 = seq_feats
+        s_z_0 = pair_feats
+
+        
+        def trunk_iter(s, z, residx, mask):
+            z = z + self.pairwise_positional_embedding(residx, mask=mask)
+            blocks = self._prep_blocks(mask=mask, residue_index=residx, chunk_size=self.chunk_size)
+
+            s, z = checkpoint_blocks(
+                blocks,
+                args=(s, z),
+                blocks_per_ckpt=1,
+            )
+            return s, z
+
+
+        s_s, s_z = trunk_iter(s_s_0, s_z_0, residx, mask)
+        return s_s, s_z
+
+class ProteinDecoder(FoldingTrunk):
+    def __init__(self, cfg):
+        super(ProteinDecoder, self).__init__(cfg)
+
+    def forward(self, s_s, s_z, batch):
+        # === Structure module ===
+        structure = {}
+        true_aa = batch['aatype']
+        mask = batch['seq_mask']
+        structure["sm"] = self.structure_module(
+            {"single": self.trunk2sm_s(s_s), "pair": self.trunk2sm_z(s_z)},
+            true_aa,
+            mask.float(),
+        )
+        
+        assert isinstance(structure, dict)  # type: ignore
+        structure["s_s"] = s_s
+        structure["s_z"] = s_z
+
+        return structure
+
 
 def save_protein_structure(filename, sequence, coordinates):
     """Save generated protein structure in PDB format with full backbone"""
@@ -169,69 +322,39 @@ config = model_config(
     low_prec=True
 ) 
 print('config:', config.keys())
+# dataset = ProteinDataset("/share/project/linwenjun/swissprot_pdb_v4", max_length = 256)
+dataset = OpenFoldSingleDataset(data_dir='/share/project/xiaohongwang/Datasets/pdb_mmcif_data_npz',
+                                alignment_dir='/share/project/xiaohongwang/Datasets/openfold/pdb',
+                                pdb_chains=pd.read_csv('./pdb_mmcif_msa.csv',
+                                                       index_col='name'),
+                                config=config.data
+                                )
 
-trainer = pl.Trainer(
-    accelerator="gpu",
-    max_epochs=args.epochs,
-    limit_train_batches=args.limit_batches or 1.0,
-    limit_val_batches=args.limit_batches or 1.0,
-    num_sanity_val_steps=0,
-    enable_progress_bar=not args.wandb,
-    gradient_clip_val=args.grad_clip,
-    callbacks=[ModelCheckpoint(
-        dirpath=os.environ["MODEL_DIR"], 
-        save_top_k=-1,
-        every_n_epochs=args.ckpt_freq,
-    )],
-    accumulate_grad_batches=args.accumulate_grad,
-    check_val_every_n_epoch=args.val_freq,
-    logger=False,
-)
-esm_model = ESMFoldWrapper(config, args)
-if args.ckpt is None:
-    print("Loading the model")
-    path = "/share/project/xiaohongwang/Routine_ckpts/esm_pretrained_models/esm2_t33_650M_UR50D.pt"
-    model_data = torch.load(path)
-    model_state = model_data["model"]
-    esm_model.model.load_state_dict(model_state, strict=False)
-    print("Model has been loaded")
-    
-    if not args.no_ema:
-        esm_model.ema = ExponentialMovingAverage(
-            model=esm_model.model, decay=config.ema.decay
-        ) # need to initialize EMA this way at the beginning
 
-trainset = OpenFoldSingleDataset(
-    data_dir='/share/project/xiaohongwang/Datasets/pdb_mmcif_data_npz',
-    alignment_dir='/share/project/xiaohongwang/Datasets/openfold/pdb',
-    pdb_chains=pd.read_csv('./pdb_mmcif_msa.csv', index_col='name'),
-    config=config.data
-)
-trainset = OpenFoldDataset([trainset], [1.0], 10000)
-
-train_loader = DataLoader(
-    trainset,
-    batch_size=args.batch_size,
+# Use custom collate function instead of model.create_dataloader
+# dataloader = model.create_dataloader(dataset, batch_size = 2, shuffle = True)
+dataloader = DataLoader(
+    dataset,
+    batch_size=1,
+    shuffle=True,
+    # collate_fn=collate_protein_batch,
     collate_fn=OpenFoldBatchCollator(),
-    num_workers=args.num_workers,
-    shuffle=not args.filter_chains,
+    num_workers=4,
+    pin_memory=True,
+    persistent_workers=True
 )
 
-iter_dl = cycle(train_loader)
+iter_dl = cycle(dataloader)
 
 model_cfg = config.model
 trunk_cfg = config.model.trunk
-
-ProtEncoder = esm_model.evoformer_stack
-ProtDecoder = esm_model.structure_module
-
 model = DiLLM(
     num_text_tokens = 21,  # Number of amino acids
     dim_latent = 21,  # Latent dimension for protein representation
     channel_first_latent = False,  # Protein data is not channel-first
     modality_default_shape = (512,),  # Maximum sequence length
-    modality_encoder = ProtEncoder,
-    modality_decoder = ProtDecoder,
+    modality_encoder = ProteinEncoder(cfg=model_cfg),
+    modality_decoder = ProteinDecoder(cfg=trunk_cfg),
     pre_post_transformer_enc_dec = (
         nn.Linear(21, 2048),  # Adapt latent dimension to transformer dimension
         nn.Linear(2048, 21),
@@ -247,10 +370,6 @@ model = DiLLM(
         'use_gradient_checkpointing': True
     },
 ).to(device)
-
-val_loader = None
-trainer.fit(model, train_loader, val_loader, ckpt_path=args.ckpt)
-
 
 ema_model = model.create_ema(0.9)
 

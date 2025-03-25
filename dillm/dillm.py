@@ -2174,7 +2174,16 @@ class DiLLM(Module):
         return_loss_breakdown = False
     ) -> Scalar | Float['b ...']:
         requires_velocity_consistency = exists(velocity_consistency_ema_model)
-        modalities = modalities.to(self.device)
+
+        # Handle the case where modalities is a dictionary
+        if isinstance(modalities, dict):
+            # Convert dictionary values to the correct device
+            modalities = {
+                k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                for k, v in modalities.items()
+            }
+        elif isinstance(modalities, torch.Tensor):
+            modalities = modalities.to(self.device)
         orig_modalities = modalities
 
         if self.num_modalities > 1:
@@ -2193,7 +2202,7 @@ class DiLLM(Module):
 
         # shapes and device
 
-        tokens = modalities
+        _, tokens = modalities # s_s, s_s
 
         batch, device = tokens.shape[0], tokens.device
 
@@ -2374,6 +2383,8 @@ class DiLLM(Module):
             if isinstance(sampled_modality, tuple):
                 seq_logits, coords_pred = sampled_modality
                 return seq_logits, coords_pred
+            elif isinstance(sampled_modality, dict):
+                return sampled_modality
         return sampled_modality
 
     @typecheck
@@ -2381,6 +2392,7 @@ class DiLLM(Module):
         self,
         seq_tensor: Int['b n'],
         coords_tensor: Float['b n 3'],
+        batch: dict,
         times: Float['b'] | None = None,
         modality_type: int | None = None,
         return_loss = True,
