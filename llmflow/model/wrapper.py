@@ -6,6 +6,7 @@ from torch import nn
 from .esmfold import ESMFold
 from .alphafold import AlphaFold
 from llmflow import LLMFlow
+from transflow import TransFlow
 import sys; sys.path.append('.')
 from llmflow.utils.loss import AlphaFoldLoss
 from llmflow.utils.diffusion import HarmonicPrior, rmsdalign
@@ -460,6 +461,85 @@ class ModelWrapper(pl.LightningModule):
                 "name": "AlphaFoldLRScheduler",
             }
         }
+
+class TransFlowWrapper(ModelWrapper):
+    def __init__(self, cfg, args, training=True):
+        super().__init__()
+        self.save_hyperparameters()
+        self.cfg = cfg
+        self.args = args
+        self.esm_model = ESMFold(cfg.model,
+                extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
+        if args.ckpt is None:
+            print("Loading the model esmfold")
+            path = "/share/project/xiaohongwang/Routine_ckpts/esm_pretrained_models/esm2_t33_650M_UR50D.pt"
+            model_data = torch.load(path)
+            model_state = model_data["model"]
+            self.esm_model.load_state_dict(model_state, strict=False)
+            print("Model esmfold has been loaded")
+        
+        self.evoformer_stack = self.esm_model.trunk.blocks
+        self.structure_module = self.esm_model.trunk.structure_module
+        self.model = TransFlow(
+            num_text_tokens = 21,  # Number of amino acids
+            dim_latent = 21,  # Latent dimension for protein representation
+            channel_first_latent = False,  # Protein data is not channel-first
+            modality_default_shape = (512,),  # Maximum sequence length
+            modality_encoder = self.evoformer_stack,
+            modality_decoder = self.structure_module,
+            pre_post_transformer_enc_dec = (
+                nn.Linear(21, 2048),  # Adapt latent dimension to transformer dimension
+                nn.Linear(2048, 21),
+            ),
+            add_pos_emb = True,  # Important for sequence data
+            modality_num_dim = 1,  # 1D sequence data
+            fallback_to_default_shape_if_invalid = True,
+            reconstruction_loss_weight = 1.0,
+            transformer = dict(
+                dim = 256,
+                depth = 8,
+                dim_head = 64,
+                heads = 8
+            )
+        )
+        
+        if not args.no_ema:
+            self.ema = ExponentialMovingAverage(
+                model=self.model, decay=cfg.ema.decay
+            )
+        
+        # Initialize training-related attributes
+        self.iter_step = 0
+        self.last_log_time = time.time()
+        self._log = defaultdict(list)
+        
+        # Initialize harmonic prior and generator
+        self.harmonic_prior = HarmonicPrior(cfg.data.train.crop_size)
+        self.generator = torch.Generator().manual_seed(137)
+
+    def training_step(self, batch, batch_idx, stage='train'):
+        self.iter_step += 1
+        device = batch["aatype"].device
+        batch_size = batch['aatype'].shape[0]
+        self.harmonic_prior.to(device)
+
+        result = self.model.forward_modality(
+            modalities=batch,
+            times=None,
+            modality_type=0,
+            return_loss=True,
+            return_loss_breakdown=True
+        )
+        if isinstance(result, tuple) and len(result) == 2:
+            total_loss, (flow_loss, velocity_loss, recon_loss) = result
+        else:
+
+            total_loss = result
+            flow_loss = total_loss * 0.9
+            recon_loss = total_loss * 0.1
+            print("Warning: forward_seq_coord didn't return loss breakdown, using approximations.")
+        
+        return total_loss, (flow_loss, velocity_loss, recon_loss)
 
 class LLMFlowWrapper(ModelWrapper):
     def __init__(self, cfg, args, training=True):

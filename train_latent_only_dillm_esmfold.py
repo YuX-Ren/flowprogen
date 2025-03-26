@@ -36,7 +36,7 @@ import sys; sys.path.append('.')
 torch.set_float32_matmul_precision("high")
 from llmflow.config import model_config
 from llmflow.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
-from llmflow.model.wrapper import LLMFlowWrapper
+from llmflow.model.wrapper import LLMFlowWrapper, TransFlowWrapper
 from llmflow.utils.parsing import parse_train_args
 args = parse_train_args()
 from llmflow.utils.logging import get_logger

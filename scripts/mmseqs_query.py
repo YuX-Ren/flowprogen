@@ -284,7 +284,7 @@ def run_mmseqs2(x, prefix, use_env=True, use_filter=True,
 df = pd.read_csv(args.split, index_col='name')
 os.makedirs(args.outdir, exist_ok=True)
 
-msas = run_mmseqs2(list(df.seqres), prefix='/tmp/', user_agent='./dillm')
+msas = run_mmseqs2(list(df.seqres), prefix='/tmp/', user_agent='./llmflow')
 os.system('rm -r /tmp/_env')
 
 for name, msa in zip(df.index, msas):
