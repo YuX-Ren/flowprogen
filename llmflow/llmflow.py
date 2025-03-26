@@ -2196,11 +2196,18 @@ class LLMFlow(Module):
         # maybe modality encode
         if encode_modality and exists(mod.encoder):
             with torch.no_grad():
-                if isinstance(mod.encoder, nn.Module):
-                    mod.encoder.eval()
-                    modalities = mod.encoder(modalities).detach()
+                if isinstance(mod.encoder, ModuleList):
+                    # Handle the case where encoder requires pairwise_state
+                    if hasattr(mod.encoder[modality_type], 'forward') and 'pairwise_state' in mod.encoder[modality_type].forward.__code__.co_varnames:
+                        # Create a dummy pairwise_state if needed
+                        batch_size = modalities.shape[0]
+                        seq_len = modalities.shape[1]
+                        pairwise_state = torch.zeros((batch_size, seq_len, seq_len, 1), device=modalities.device)
+                        modalities = mod.encoder[modality_type](modalities, pairwise_state).detach()
+                    else:
+                        modalities = mod.encoder[modality_type](modalities).detach()
                 else:
-                    # If encoder is not a Module, use it directly
+                    mod.encoder.eval()
                     modalities = mod.encoder(modalities).detach()
 
         # shapes and device

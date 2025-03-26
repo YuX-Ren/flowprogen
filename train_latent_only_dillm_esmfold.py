@@ -1,7 +1,8 @@
 from llmflow.utils.parsing import parse_train_args
 args = parse_train_args()
+
 import os
-import torch
+# import torch
 import wandb
 import pandas as pd
 from shutil import rmtree
@@ -12,7 +13,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader
 
 import sys; sys.path.append('.')
-torch.set_float32_matmul_precision("high")
+# torch.set_float32_matmul_precision("high")
 from llmflow.config import model_config
 from llmflow.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
 from llmflow.model.wrapper import LLMFlowWrapper, TransFlowWrapper
@@ -20,35 +21,29 @@ from llmflow.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-RUN_NAME = "train_latent_only_dillm_esmfold"
 
 is_main_process = pl.utilities.rank_zero_only.rank == 0
 
 if is_main_process:
     wandb.init(
         project="dillm", 
-        name=RUN_NAME,
+        name=args.run_name,
     )
-    rmtree(f'./results_llmflow/{RUN_NAME}', ignore_errors=True)
-    results_folder = Path(f'./results_llmflow/{RUN_NAME}')
+    rmtree(f'./results_llmflow/{args.run_name}', ignore_errors=True)
+    results_folder = Path(f'./results_llmflow/{args.run_name}')
     results_folder.mkdir(exist_ok=True, parents=True)
 
 # device = torch.device('cuda:0')
-
-# functions
-def divisible_by(num, den):
-    return (num % den) == 0
-
-def cycle(iter_dl):
-    while True:
-        for batch in iter_dl:
-            yield batch
 
 config = model_config(
     'initial_training',
     train=True, 
     low_prec=True
 ) 
+data_cfg = config.data
+data_cfg.common.use_templates = False
+data_cfg.common.max_recycling_iters = 0
+
 if is_main_process:
     logger.info(f'config: {config.keys()}')
 
@@ -71,12 +66,17 @@ trainer = pl.Trainer(
 )
 
 trainset = OpenFoldSingleDataset(
-    data_dir='/share/project/xiaohongwang/Datasets/pdb_mmcif_data_npz',
-    alignment_dir='/share/project/xiaohongwang/Datasets/openfold/pdb',
-    pdb_chains=pd.read_csv('./pdb_mmcif_msa.csv', index_col='name'),
-    config=config.data
+    data_dir = args.train_data_dir,
+    alignment_dir = args.train_msa_dir,
+    pdb_chains = pdb_chains,
+    config = data_cfg,
+    mode = 'train',
+    subsample_pos = args.sample_train_confs,
+    first_as_template = args.first_as_template,
 )
-trainset = OpenFoldDataset([trainset], [1.0], epoch_len=args.train_epoch_len)
+
+if args.filter_chains:
+    trainset = OpenFoldDataset([trainset], [1.0], epoch_len=args.train_epoch_len)
 
 train_loader = DataLoader(
     trainset,
@@ -86,7 +86,6 @@ train_loader = DataLoader(
     shuffle=not args.filter_chains,
 )
 
-iter_dl = cycle(train_loader)
 
 model_cfg = config.model
 trunk_cfg = config.model.trunk

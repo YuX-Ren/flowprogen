@@ -1,11 +1,11 @@
 from argparse import ArgumentParser
-import subprocess, os
+import os
 
 
 def parse_train_args():
     parser = ArgumentParser()
 
-    parser.add_argument("--mode", choices=['esmfold', 'alphafold'], default='alphafold')
+    parser.add_argument("--mode", choices=['esmfold', 'alphafold', 'llmflow', 'transflow'], default='alphafold')
     
     ## Trainer settings
     parser.add_argument("--ckpt", type=str, default=None)
