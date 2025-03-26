@@ -1,26 +1,23 @@
 
-ProtFlowLLM: Protein Design Based on Large Language Models and Flow Matching    
-ProtFlowLLM: Controllable Protein Backbone Generation based on Flow Matching and LLM
+FlowProGen: Protein Design Based on Large Language Models and Flow Matching    
+FlowProGen: Controllable Protein Backbone Generation based on Flow Matching and LLM
+FlowProGen: Latent-level Controllable Protein Backbone Generation based on Flow Matching
 
 
-This code is adapted from [Transfusion - Pytorch](https://github.com/lucidrains/transfusion-pytorch), which is a Pytorch implementation of [Transfusion: Predict the Next Token and Diffuse Images with One Multi-Modal Model](https://www.arxiv.org/abs/2408.11039) from Meta AI.
+This code is adapted from two codebases:
+ - [Transfusion - Pytorch](https://github.com/lucidrains/transfusion-pytorch), which is a Pytorch implementation of [Transfusion: Predict the Next Token and Diffuse Images with One Multi-Modal Model](https://www.arxiv.org/abs/2408.11039) from Meta AI
+ - [AlphaFlow](https://github.com/bjing2016/alphaflow), which is a Pytorch implementation of [AlphaFold Meets Flow Matching for Generating Protein Ensembles](https://arxiv.org/abs/2402.04845).
 
 
 ## Usage
 
 train_latent_only_dillm_esmfold.py
 
-## Prepare AlphaFlow
-```
-git clone xxxxx.dillm.git
-cd dillm
-git clone git@github.com:bjing2016/alphaflow.git
-```
 
 ## Installing OpenFold
 
 ```
-cd dillm
+cd FlowProGen
 git clone git@github.com:aqlaboratory/openfold.git
 python setup.py install
 ```
