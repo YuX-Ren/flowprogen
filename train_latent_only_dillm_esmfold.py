@@ -1,48 +1,24 @@
+from llmflow.utils.parsing import parse_train_args
+args = parse_train_args()
 import os
 import torch
-import numpy as np
 import wandb
 import pandas as pd
 from shutil import rmtree
 from pathlib import Path
 
-import typing as T
-from torch import nn, tensor, Tensor
-from torch.nn import Module
-from torch.utils.data import Dataset, DataLoader
-from torch.optim import Adam, AdamW
-from torch.optim.lr_scheduler import CosineAnnealingLR
-from torch.nn.utils import clip_grad_norm_
-import torch.nn.functional as F
-
-from einops import rearrange
-
-from llmflow import LLMFlow, print_modality_sample
-
-from datasets import load_dataset
-from diffusers.models import AutoencoderKL
-
-from Bio import SeqIO
-from Bio.PDB import *
-from Bio.PDB import PDBParser, PDBIO, Polypeptide
-from Bio.PDB.StructureBuilder import StructureBuilder
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
+from torch.utils.data import DataLoader
 
 import sys; sys.path.append('.')
 torch.set_float32_matmul_precision("high")
 from llmflow.config import model_config
 from llmflow.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
 from llmflow.model.wrapper import LLMFlowWrapper, TransFlowWrapper
-from llmflow.utils.parsing import parse_train_args
-args = parse_train_args()
 from llmflow.utils.logging import get_logger
 logger = get_logger(__name__)
 
-from openfold.utils.exponential_moving_average import ExponentialMovingAverage
-from openfold.utils.feats import atom14_to_atom37, pseudo_beta_fn
-from openfold.utils.checkpointing import checkpoint_blocks
-from openfold.np import residue_constants
 
 RUN_NAME = "train_latent_only_dillm_esmfold"
 
@@ -58,9 +34,6 @@ if is_main_process:
     results_folder.mkdir(exist_ok=True, parents=True)
 
 # device = torch.device('cuda:0')
-
-# constants
-SAMPLE_EVERY = 100
 
 # functions
 def divisible_by(num, den):

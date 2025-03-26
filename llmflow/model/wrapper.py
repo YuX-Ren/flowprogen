@@ -5,8 +5,7 @@ import pandas as pd
 from torch import nn
 from .esmfold import ESMFold
 from .alphafold import AlphaFold
-from llmflow import LLMFlow
-from transflow import TransFlow
+from llmflow import LLMFlow,TransFlow
 import sys; sys.path.append('.')
 from llmflow.utils.loss import AlphaFoldLoss
 from llmflow.utils.diffusion import HarmonicPrior, rmsdalign
