@@ -2194,25 +2194,28 @@ class DiLLM(Module):
         mod = self.get_modality_info(modality_type)
 
         # maybe modality encode
-
         if encode_modality and exists(mod.encoder):
             with torch.no_grad():
-                mod.encoder.eval()
-                modalities = mod.encoder(modalities).detach()
+                if isinstance(mod.encoder, nn.Module):
+                    mod.encoder.eval()
+                    modalities = mod.encoder(modalities).detach()
+                else:
+                    # If encoder is not a Module, use it directly
+                    modalities = mod.encoder(modalities).detach()
 
         # shapes and device
-
-        _, tokens = modalities # s_s, s_z
+        if isinstance(modalities, tuple):
+            _, tokens = modalities  # s_s, s_z
+        else:
+            tokens = modalities
 
         batch, device = tokens.shape[0], tokens.device
 
         # times
-
         if not exists(times):
             times = torch.rand((batch,), device = device)
 
         if return_loss:
-
             if requires_velocity_consistency:
                 orig_times = times.clone()
                 times = times * (1. - velocity_consistency_delta_time) # make sure times are max of 1. - small delta, for velocity consistency
@@ -2229,30 +2232,25 @@ class DiLLM(Module):
             noised_tokens = tokens
 
         # from latent to model tokens
-
         noised_tokens = mod.latent_to_model(noised_tokens)
 
         # axial positions
-
         if mod.add_pos_emb:
             assert exists(mod.num_dim), f'modality_num_dim must be set for modality {modality_type} if further injecting axial positional embedding'
 
             _, *axial_dims, _ = noised_tokens.shape
 
-            assert len(axial_dims) == mod.num_dim, f'received modalities of ndim {len(axial_dims)} but expected {modality_num_dim}'
+            assert len(axial_dims) == mod.num_dim, f'received modalities of ndim {len(axial_dims)} but expected {mod.num_dim}'
 
         # maybe transform
-
         noised_tokens, inverse_pack_axial_dims = pack_one_with_inverse(noised_tokens, 'b * d')
 
         # maybe add axial pos emb
-
         if mod.add_pos_emb:
             axial_pos_emb = mod.pos_emb_mlp(tensor(axial_dims), flatten = True)
             noised_tokens = noised_tokens + axial_pos_emb
 
         # attention
-
         embed = self.transformer(
             noised_tokens,
             times = times,
@@ -2267,15 +2265,12 @@ class DiLLM(Module):
             return pred_flow
 
         # flow loss
-
         flow_loss = F.mse_loss(pred_flow, flow)
 
         # maybe velocity consistency loss
-
         velocity_loss = self.zero
 
         if requires_velocity_consistency:
-
             with torch.no_grad():
                 flow_with_delta_time = velocity_consistency_ema_model.forward_modality(
                     modalities = modalities,
@@ -2288,33 +2283,27 @@ class DiLLM(Module):
             velocity_loss = F.mse_loss(flow, flow_with_delta_time)
 
         # maybe recon loss
-
         recon_loss = self.zero
 
         if self.has_recon_loss:
-            # assert encode_modality
+            assert encode_modality
 
             recon = noise + pred_flow * (1. - padded_times)
 
             if exists(mod.decoder):
                 with torch.no_grad():
-                    mod.decoder.eval()
-                    recon = mod.decoder(recon)
+                    if isinstance(mod.decoder, nn.Module):
+                        mod.decoder.eval()
+                        recon = mod.decoder(recon)
+                    else:
+                        recon = mod.decoder(recon)
 
-            if isinstance(recon, tuple):
-                seq_logits, coords_pred = recon
-                recon_loss = F.mse_loss(
-                    seq_logits,
-                    orig_modalities
-                )
-            else:
-                recon_loss = F.mse_loss(
-                    recon,
-                    orig_modalities
-                )
+            recon_loss = F.mse_loss(
+                recon,
+                orig_modalities
+            )
 
         # total loss
-
         total_loss = (
             flow_loss +
             velocity_loss * self.velocity_consistency_loss_weight +

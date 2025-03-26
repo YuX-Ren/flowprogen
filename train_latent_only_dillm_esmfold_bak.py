@@ -31,10 +31,10 @@ from Bio.PDB.StructureBuilder import StructureBuilder
 
 import sys; sys.path.append('.')
 torch.set_float32_matmul_precision("high")
-from dillm.model.esmfold import ESMFold
-from dillm.model.trunk import FoldingTrunk
-from dillm.config import model_config
-from dillm.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
+from llmflow.model.esmfold import ESMFold
+from llmflow.model.trunk import FoldingTrunk
+from llmflow.config import model_config
+from llmflow.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
 
 from openfold.utils.exponential_moving_average import ExponentialMovingAverage
 from openfold.utils.feats import atom14_to_atom37, pseudo_beta_fn

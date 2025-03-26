@@ -12,7 +12,7 @@ import pandas as pd
 import numpy as np
 from multiprocessing import Pool
 import sys;sys.path.append('.')
-from dillm.data.data_pipeline import DataPipeline
+from llmflow.data.data_pipeline import DataPipeline
 from openfold.data import mmcif_parsing
 from Bio.PDB import PDBParser
 

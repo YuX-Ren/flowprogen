@@ -250,7 +250,7 @@ class Decoder(Module):
         return ((x + 1) * 0.5).clamp(min = 0., max = 1.)
 
 # 修补LlamaTransformer类，确保time_mlp使用float16
-from dillm.dillm import LlamaTransformer
+from llmflow.llmflow import LlamaTransformer
 def check_gradients(model, step):
     """检查模型梯度是否包含NaN或Inf值"""
     has_nan = False

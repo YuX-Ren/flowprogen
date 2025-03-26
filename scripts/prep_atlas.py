@@ -8,7 +8,7 @@ parser.add_argument('--num_workers', type=int, default=1)
 args = parser.parse_args()
 
 import mdtraj, os, tempfile, tqdm
-from dillm.utils import protein
+from llmflow.utils import protein
 from openfold.data.data_pipeline import make_protein_features
 import pandas as pd 
 from multiprocessing import Pool

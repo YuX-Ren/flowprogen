@@ -52,10 +52,10 @@ from Bio.PDB import *
 from Bio.PDB import PDBParser, PDBIO, Polypeptide
 from Bio.PDB.StructureBuilder import StructureBuilder
 
-from dillm.model.esmfold import ESMFold
-from dillm.model.trunk import FoldingTrunk
-from dillm.config import model_config
-from dillm.data.data_modules import *
+from llmflow.model.esmfold import ESMFold
+from llmflow.model.trunk import FoldingTrunk
+from llmflow.config import model_config
+from llmflow.data.data_modules import *
 
 from openfold.utils.feats import atom14_to_atom37, pseudo_beta_fn
 from openfold.utils.checkpointing import checkpoint_blocks

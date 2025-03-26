@@ -1,4 +1,4 @@
-from dillm.utils.logging import get_logger
+from llmflow.utils.logging import get_logger
 logger = get_logger(__name__)
 import torch, os, wandb, time
 import pandas as pd
@@ -7,9 +7,9 @@ from .esmfold import ESMFold
 from .alphafold import AlphaFold
 from dillm import DiLLM
 import sys; sys.path.append('.')
-from dillm.utils.loss import AlphaFoldLoss
-from dillm.utils.diffusion import HarmonicPrior, rmsdalign
-from dillm.utils import protein
+from llmflow.utils.loss import AlphaFoldLoss
+from llmflow.utils.diffusion import HarmonicPrior, rmsdalign
+from llmflow.utils import protein
 
 from openfold.utils.loss import lddt_ca
 from openfold.utils.superimposition import superimpose

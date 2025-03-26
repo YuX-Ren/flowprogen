@@ -34,12 +34,12 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 import sys; sys.path.append('.')
 torch.set_float32_matmul_precision("high")
-from dillm.config import model_config
-from dillm.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
-from dillm.model.wrapper import DiLLMWrapper
-from dillm.utils.parsing import parse_train_args
+from llmflow.config import model_config
+from llmflow.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
+from llmflow.model.wrapper import DiLLMWrapper
+from llmflow.utils.parsing import parse_train_args
 args = parse_train_args()
-from dillm.utils.logging import get_logger
+from llmflow.utils.logging import get_logger
 logger = get_logger(__name__)
 
 from openfold.utils.exponential_moving_average import ExponentialMovingAverage
