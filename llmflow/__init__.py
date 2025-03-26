@@ -1,5 +1,5 @@
 from llmflow.llmflow import (
-    DiLLM,
+    LLMFlow,
     print_modality_sample,
     create_dataloader
 )

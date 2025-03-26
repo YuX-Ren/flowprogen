@@ -15,7 +15,7 @@ import torchvision
 import torchvision.transforms as T
 from torchvision.utils import save_image
 
-from dillm import DiLLM, print_modality_sample
+from llmflow import LLMFlow, print_modality_sample
 
 # hf related
 
@@ -68,7 +68,7 @@ def divisible_by(num, den):
 
 # encoder / decoder
 
-model = DiLLM(
+model = LLMFlow(
     num_text_tokens = 10,
     dim_latent = 4,
     channel_first_latent = True,

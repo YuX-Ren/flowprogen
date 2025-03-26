@@ -19,7 +19,7 @@ import torch.nn.functional as F
 
 from einops import rearrange
 
-from dillm import DiLLM, print_modality_sample
+from llmflow import LLMFlow, print_modality_sample
 
 # hf related
 from datasets import load_dataset
@@ -36,7 +36,7 @@ import sys; sys.path.append('.')
 torch.set_float32_matmul_precision("high")
 from llmflow.config import model_config
 from llmflow.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
-from llmflow.model.wrapper import DiLLMWrapper
+from llmflow.model.wrapper import LLMFlowWrapper
 from llmflow.utils.parsing import parse_train_args
 args = parse_train_args()
 from llmflow.utils.logging import get_logger
@@ -214,7 +214,7 @@ iter_dl = cycle(train_loader)
 model_cfg = config.model
 trunk_cfg = config.model.trunk
 
-model = DiLLMWrapper(config, args)
+model = LLMFlowWrapper(config, args)
 # ProtEncoder = model.evoformer_stack
 # ProtDecoder = model.structure_module
 

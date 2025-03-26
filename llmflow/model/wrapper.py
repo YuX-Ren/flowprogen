@@ -5,7 +5,7 @@ import pandas as pd
 from torch import nn
 from .esmfold import ESMFold
 from .alphafold import AlphaFold
-from dillm import DiLLM
+from llmflow import LLMFlow
 import sys; sys.path.append('.')
 from llmflow.utils.loss import AlphaFoldLoss
 from llmflow.utils.diffusion import HarmonicPrior, rmsdalign
@@ -461,7 +461,7 @@ class ModelWrapper(pl.LightningModule):
             }
         }
 
-class DiLLMWrapper(ModelWrapper):
+class LLMFlowWrapper(ModelWrapper):
     def __init__(self, cfg, args, training=True):
         super().__init__()
         self.save_hyperparameters()
@@ -480,7 +480,7 @@ class DiLLMWrapper(ModelWrapper):
         
         self.evoformer_stack = self.esm_model.trunk.blocks
         self.structure_module = self.esm_model.trunk.structure_module
-        self.model = DiLLM(
+        self.model = LLMFlow(
             num_text_tokens = 21,  # Number of amino acids
             dim_latent = 21,  # Latent dimension for protein representation
             channel_first_latent = False,  # Protein data is not channel-first

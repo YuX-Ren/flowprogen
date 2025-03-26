@@ -14,7 +14,7 @@ import torchvision
 import torchvision.transforms as T
 from torchvision.utils import save_image
 
-from dillm import DiLLM, print_modality_sample
+from llmflow import LLMFlow, print_modality_sample
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
@@ -52,7 +52,7 @@ if local_rank == 0:
             "learning_rate": 1e-8,
             "weight_decay": 1e-5,
             "batch_size": 8,
-            "model": "DiLLM-Llama3.2-3B",
+            "model": "LLMFlow-Llama3.2-3B",
             "freeze_steps": 5000,
             "accumulation_steps": 4,
         }
@@ -191,7 +191,7 @@ class MemoryEfficientEMA:
             if was_training:
                 self.train()
     
-    # 添加 return_only_pred_flows 方法，以兼容 DiLLM 的期望
+    # 添加 return_only_pred_flows 方法，以兼容 LLMFlow 的期望
     def return_only_pred_flows(self, *args, **kwargs):
         # 确保使用 EMA 权重
         was_training = self.training
@@ -384,7 +384,7 @@ def initialize_model_to_latent_projs(model):
     if hasattr(model, 'module'):
         initialize_model_to_latent_projs(model.module)
 
-model = DiLLM(
+model = LLMFlow(
     num_text_tokens = 10,
     dim_latent = 4,
     channel_first_latent = False,

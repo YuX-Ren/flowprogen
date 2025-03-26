@@ -18,7 +18,7 @@ import torchvision
 import torchvision.transforms as T
 from torchvision.utils import save_image
 
-from dillm import DiLLM, print_modality_sample
+from llmflow import LLMFlow, print_modality_sample
 
 import json
 import wandb
@@ -221,15 +221,15 @@ class ProteinDecoder(Module):
     def __call__(self, z):
         """重写__call__方法，使其根据调用上下文返回正确的输出格式
         
-        当作为DiLLM的decoder调用时(通过`_is_called_by_model_decoder`标志识别)：
+        当作为LLMFlow的decoder调用时(通过`_is_called_by_model_decoder`标志识别)：
         - 返回与输入相同形状的张量，确保MSE损失计算正确
         
         当正常调用时：
         - 返回标准的forward方法输出(seq_logits, coords)
         """
-        # 检查是否是DiLLM调用
+        # 检查是否是LLMFlow调用
         if getattr(self, '_is_called_by_model_decoder', False):
-            # 如果是DiLLM调用，重置标志并返回输入z
+            # 如果是LLMFlow调用，重置标志并返回输入z
             # 这是最简单的解决方案，确保MSE损失能够计算
             self._is_called_by_model_decoder = False
             return z  # 直接返回输入，避免任何形状不匹配问题
@@ -863,7 +863,7 @@ def save_protein_structure(filename, sequence, coordinates):
     io.set_structure(structure)
     io.save(filename)
 
-model = DiLLM(
+model = LLMFlow(
     num_text_tokens = 20,  # Number of amino acids
     dim_latent = 20,  # Latent dimension for protein representation
     channel_first_latent = False,  # Protein data is not channel-first

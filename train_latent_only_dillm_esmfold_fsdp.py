@@ -41,7 +41,7 @@ import torch.nn.functional as F
 
 from einops import rearrange
 
-from dillm import DiLLM, print_modality_sample
+from llmflow import LLMFlow, print_modality_sample
 
 # hf related
 from datasets import load_dataset
@@ -433,7 +433,7 @@ def save_protein_structure(filename, sequence, coordinates):
     io.set_structure(structure)
     io.save(filename)
 
-model = DiLLM(
+model = LLMFlow(
     num_text_tokens = 20,  # Number of amino acids
     dim_latent = 20,  # Latent dimension for protein representation
     channel_first_latent = False,  # Protein data is not channel-first
@@ -815,7 +815,7 @@ for step in range(1, 10_000 + 1):
                     print("Creating checkpoint for sampling...")
                     if ema_model is None:
                         # 创建一个新的模型实例
-                        ema_model = DiLLM(
+                        ema_model = LLMFlow(
                             num_text_tokens = 20,
                             dim_latent = 20,
                             channel_first_latent = False,

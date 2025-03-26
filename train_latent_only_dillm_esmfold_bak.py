@@ -18,7 +18,7 @@ import torch.nn.functional as F
 
 from einops import rearrange
 
-from dillm import DiLLM, print_modality_sample
+from llmflow import LLMFlow, print_modality_sample
 
 # hf related
 from datasets import load_dataset
@@ -348,7 +348,7 @@ iter_dl = cycle(dataloader)
 
 model_cfg = config.model
 trunk_cfg = config.model.trunk
-model = DiLLM(
+model = LLMFlow(
     num_text_tokens = 21,  # Number of amino acids
     dim_latent = 21,  # Latent dimension for protein representation
     channel_first_latent = False,  # Protein data is not channel-first
