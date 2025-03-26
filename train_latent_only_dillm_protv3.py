@@ -62,13 +62,6 @@ from Bio.PDB import *
 import torch.nn.functional as F
 from Bio.PDB import Polypeptide
 
-# 移除OpenFold导入
-# from alphaflow.openfold.openfold.model.evoformer import (
-#     EvoformerBlock,
-#     EvoformerStack,
-# )
-# from alphaflow.openfold.openfold.model.structure_module import StructureModule
-
 
 # 设置随机种子，提高实验可重复性
 def set_seed(seed=42):

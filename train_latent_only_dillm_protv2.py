@@ -34,12 +34,6 @@ from Bio.PDB import PDBParser, PDBIO, Polypeptide
 from Bio.PDB.StructureBuilder import StructureBuilder
 import numpy as np
 import random
-# 移除OpenFold导入
-# from alphaflow.openfold.openfold.model.evoformer import (
-#     EvoformerBlock,
-#     EvoformerStack,
-# )
-# from alphaflow.openfold.openfold.model.structure_module import StructureModule
 
 
 # 设置PyTorch内存管理
