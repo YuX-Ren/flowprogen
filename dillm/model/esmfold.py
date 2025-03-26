@@ -12,7 +12,8 @@ from torch.nn import LayerNorm
 import esm
 from esm.data import Alphabet
 
-
+from dillm.utils.logging import get_logger
+logger = get_logger(__name__)
 from dillm.utils.misc import (
     categorical_lddt,
     batch_encode_sequences,
@@ -53,7 +54,7 @@ class ESMFold(nn.Module):
 
         self.cfg = cfg
         cfg = self.cfg
-        print('model_cfg:', cfg.keys())
+        logger.info(f'model_cfg: {cfg.keys()}')
         self.distogram_bins = 64
         self.esm, self.esm_dict = esm_registry.get(cfg.esm_type)()
 

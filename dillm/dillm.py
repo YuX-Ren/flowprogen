@@ -2202,7 +2202,7 @@ class DiLLM(Module):
 
         # shapes and device
 
-        _, tokens = modalities # s_s, s_s
+        _, tokens = modalities # s_s, s_z
 
         batch, device = tokens.shape[0], tokens.device
 

@@ -2,10 +2,10 @@ from dillm.utils.logging import get_logger
 logger = get_logger(__name__)
 import torch, os, wandb, time
 import pandas as pd
-
+from torch import nn
 from .esmfold import ESMFold
 from .alphafold import AlphaFold
-
+from dillm import DiLLM
 import sys; sys.path.append('.')
 from dillm.utils.loss import AlphaFoldLoss
 from dillm.utils.diffusion import HarmonicPrior, rmsdalign
@@ -142,31 +142,9 @@ class ModelWrapper(pl.LightningModule):
             
         
         if torch.rand(1, generator=self.generator).item() < self.args.noise_prob:
-            # Run the model forward to get the Evoformer outputs
-            with torch.no_grad():
-                # Get the Evoformer outputs without adding noise to the batch
-                s_s, s_z = self.model.encoder.trunk_iter(batch)
-                
-                # Add noise to the latent representations
-                noise_scale = batch.get('t', torch.ones(s_s.shape[0], device=s_s.device))
-                if noise_scale.dim() == 1:
-                    noise_scale = noise_scale.view(-1, 1, 1)
-                
-                # Add noise to single representation (s_s)
-                s_s_noise = torch.randn_like(s_s) * noise_scale.view(*noise_scale.shape, 1)
-                s_s = s_s + s_s_noise
-                # Add noise to pair representation (s_z)
-                s_z_noise = torch.randn_like(s_z) * noise_scale.view(*noise_scale.shape, 1, 1)
-                s_z = s_z + s_z_noise
-                
-                # Store the noised representations in the batch for later use
-                batch['noised_single_repr'] = s_s
-                batch['noised_pair_repr'] = s_z
-                batch['use_noised_repr'] = True
-                
-            self.log('time', [noise_scale.mean().item()])
+            self._add_noise(batch)
+            self.log('time', [batch['t'].mean().item()])
         else:
-            batch['use_noised_repr'] = False
             self.log('time', [1])
 
         if self.args.extra_input:
@@ -180,8 +158,8 @@ class ModelWrapper(pl.LightningModule):
             with torch.no_grad():
                 outputs = self.model(batch)
         
-        outputs = self.model.decoder(batch['noised_single_repr'], batch['noised_single_repr'], prev_outputs=outputs)
-        
+        outputs = self.model(batch, prev_outputs=outputs)
+
         loss, loss_breakdown = self.loss(outputs, batch, _return_breakdown=True)
 
         with torch.no_grad():
@@ -483,7 +461,86 @@ class ModelWrapper(pl.LightningModule):
             }
         }
 
-    
+class DiLLMWrapper(ModelWrapper):
+    def __init__(self, cfg, args, training=True):
+        super().__init__()
+        self.save_hyperparameters()
+        self.cfg = cfg
+        self.args = args
+        # self.esm_model = ESMFoldWrapper(cfg, args, training=training)
+        self.esm_model = ESMFold(cfg.model,
+                extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
+        if args.ckpt is None:
+            print("Loading the model esmfold")
+            path = "/share/project/xiaohongwang/Routine_ckpts/esm_pretrained_models/esm2_t33_650M_UR50D.pt"
+            model_data = torch.load(path)
+            model_state = model_data["model"]
+            self.esm_model.load_state_dict(model_state, strict=False)
+            print("Model esmfold has been loaded")
+        
+        self.evoformer_stack = self.esm_model.trunk.blocks
+        self.structure_module = self.esm_model.trunk.structure_module
+        self.model = DiLLM(
+            num_text_tokens = 21,  # Number of amino acids
+            dim_latent = 21,  # Latent dimension for protein representation
+            channel_first_latent = False,  # Protein data is not channel-first
+            modality_default_shape = (512,),  # Maximum sequence length
+            modality_encoder = self.evoformer_stack,
+            modality_decoder = self.structure_module,
+            pre_post_transformer_enc_dec = (
+                nn.Linear(21, 2048),  # Adapt latent dimension to transformer dimension
+                nn.Linear(2048, 21),
+            ),
+            add_pos_emb = True,  # Important for sequence data
+            modality_num_dim = 1,  # 1D sequence data
+            fallback_to_default_shape_if_invalid = True,
+            reconstruction_loss_weight = 1.0,
+            transformer={
+                'use_llama': True,
+                'dim': 2048,
+                'model_name_or_path': '/share/project/xiaohongwang/LLM_checkpoints/Llama3.2/Llama-3.2-1B-Instruct',
+                'use_gradient_checkpointing': True
+            },
+        )
+        
+        if not args.no_ema:
+            self.ema = ExponentialMovingAverage(
+                model=self.model, decay=cfg.ema.decay
+            )
+        
+        # Initialize training-related attributes
+        self.iter_step = 0
+        self.last_log_time = time.time()
+        self._log = defaultdict(list)
+        
+        # Initialize harmonic prior and generator
+        self.harmonic_prior = HarmonicPrior(cfg.data.train.crop_size)
+        self.generator = torch.Generator().manual_seed(137)
+
+    def training_step(self, batch, batch_idx, stage='train'):
+        self.iter_step += 1
+        device = batch["aatype"].device
+        batch_size = batch['aatype'].shape[0]
+        self.harmonic_prior.to(device)
+
+        result = self.model.forward_modality(
+            modalities=batch,
+            times=None,
+            modality_type=0,
+            return_loss=True,
+            return_loss_breakdown=True
+        )
+        if isinstance(result, tuple) and len(result) == 2:
+            total_loss, (flow_loss, velocity_loss, recon_loss) = result
+        else:
+
+            total_loss = result
+            flow_loss = total_loss * 0.9
+            recon_loss = total_loss * 0.1
+            print("Warning: forward_seq_coord didn't return loss breakdown, using approximations.")
+        
+        return total_loss, (flow_loss, velocity_loss, recon_loss)
+        
 class ESMFoldWrapper(ModelWrapper):
     def __init__(self, cfg, args, training=True):
         super().__init__()

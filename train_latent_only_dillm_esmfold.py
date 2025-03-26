@@ -34,11 +34,13 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 import sys; sys.path.append('.')
 torch.set_float32_matmul_precision("high")
-from dillm.utils.parsing import parse_train_args
-args = parse_train_args()
 from dillm.config import model_config
 from dillm.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
-from dillm.model.wrapper import ESMFoldWrapper
+from dillm.model.wrapper import DiLLMWrapper
+from dillm.utils.parsing import parse_train_args
+args = parse_train_args()
+from dillm.utils.logging import get_logger
+logger = get_logger(__name__)
 
 from openfold.utils.exponential_moving_average import ExponentialMovingAverage
 from openfold.utils.feats import atom14_to_atom37, pseudo_beta_fn
@@ -46,17 +48,19 @@ from openfold.utils.checkpointing import checkpoint_blocks
 from openfold.np import residue_constants
 
 RUN_NAME = "train_latent_only_dillm_esmfold"
-wandb.init(
-    project="dillm", 
-    name=RUN_NAME,
-)
-device = torch.device('cuda:0')
-rmtree(f'./results_dillm/{RUN_NAME}', ignore_errors = True)
-results_folder = Path(f'./results_dillm/{RUN_NAME}')
-results_folder.mkdir(exist_ok = True, parents = True)
 
+is_main_process = pl.utilities.rank_zero_only.rank == 0
 
+if is_main_process:
+    wandb.init(
+        project="dillm", 
+        name=RUN_NAME,
+    )
+    rmtree(f'./results_dillm/{RUN_NAME}', ignore_errors=True)
+    results_folder = Path(f'./results_dillm/{RUN_NAME}')
+    results_folder.mkdir(exist_ok=True, parents=True)
 
+# device = torch.device('cuda:0')
 
 # 内存管理函数
 def clear_memory():
@@ -168,7 +172,8 @@ config = model_config(
     train=True, 
     low_prec=True
 ) 
-print('config:', config.keys())
+if is_main_process:
+    logger.info(f'config: {config.keys()}')
 
 trainer = pl.Trainer(
     accelerator="gpu",
@@ -187,19 +192,6 @@ trainer = pl.Trainer(
     check_val_every_n_epoch=args.val_freq,
     logger=False,
 )
-esm_model = ESMFoldWrapper(config, args)
-if args.ckpt is None:
-    print("Loading the model")
-    path = "/share/project/xiaohongwang/Routine_ckpts/esm_pretrained_models/esm2_t33_650M_UR50D.pt"
-    model_data = torch.load(path)
-    model_state = model_data["model"]
-    esm_model.model.load_state_dict(model_state, strict=False)
-    print("Model has been loaded")
-    
-    if not args.no_ema:
-        esm_model.ema = ExponentialMovingAverage(
-            model=esm_model.model, decay=config.ema.decay
-        ) # need to initialize EMA this way at the beginning
 
 trainset = OpenFoldSingleDataset(
     data_dir='/share/project/xiaohongwang/Datasets/pdb_mmcif_data_npz',
@@ -207,7 +199,7 @@ trainset = OpenFoldSingleDataset(
     pdb_chains=pd.read_csv('./pdb_mmcif_msa.csv', index_col='name'),
     config=config.data
 )
-trainset = OpenFoldDataset([trainset], [1.0], 10000)
+trainset = OpenFoldDataset([trainset], [1.0], epoch_len=args.train_epoch_len)
 
 train_loader = DataLoader(
     trainset,
@@ -222,31 +214,9 @@ iter_dl = cycle(train_loader)
 model_cfg = config.model
 trunk_cfg = config.model.trunk
 
-ProtEncoder = esm_model.evoformer_stack
-ProtDecoder = esm_model.structure_module
-
-model = DiLLM(
-    num_text_tokens = 21,  # Number of amino acids
-    dim_latent = 21,  # Latent dimension for protein representation
-    channel_first_latent = False,  # Protein data is not channel-first
-    modality_default_shape = (512,),  # Maximum sequence length
-    modality_encoder = ProtEncoder,
-    modality_decoder = ProtDecoder,
-    pre_post_transformer_enc_dec = (
-        nn.Linear(21, 2048),  # Adapt latent dimension to transformer dimension
-        nn.Linear(2048, 21),
-    ),
-    add_pos_emb = True,  # Important for sequence data
-    modality_num_dim = 1,  # 1D sequence data
-    fallback_to_default_shape_if_invalid = True,
-    reconstruction_loss_weight = 1.0,
-    transformer={
-        'use_llama': True,
-        'dim': 2048,
-        'model_name_or_path': '/share/project/xiaohongwang/LLM_checkpoints/Llama3.2/Llama-3.2-1B-Instruct',
-        'use_gradient_checkpointing': True
-    },
-).to(device)
+model = DiLLMWrapper(config, args)
+# ProtEncoder = model.evoformer_stack
+# ProtDecoder = model.structure_module
 
 val_loader = None
 trainer.fit(model, train_loader, val_loader, ckpt_path=args.ckpt)
@@ -318,7 +288,6 @@ for step in range(1, 10_000 + 1):
             recon_loss = total_loss * 0.1     # 假设KL损失约占总损失的10%
             print("Warning: forward_seq_coord didn't return loss breakdown, using approximations.")
         
-        # 检查损失是否有效（不是NaN或无穷大）
         if torch.isnan(total_loss) or torch.isinf(total_loss):
             print(f"Warning: Loss is {total_loss.item()}, skipping this batch")
             optimizer.zero_grad()

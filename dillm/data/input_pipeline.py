@@ -15,6 +15,7 @@
 
 import torch
 import itertools
+import copy
 
 from openfold.data import data_transforms
 NUM_RES = "num residues placeholder"
@@ -286,10 +287,17 @@ def nonensembled_transform_fns(common_cfg, mode_cfg):
 def process_tensors_from_config(tensors, common_cfg, mode_cfg):
     """Based on the config, apply filters and transformations to the data."""
 
-    no_templates = True
-    if("template_aatype" in tensors):
+    # Check if templates are enabled in config and if template data exists
+    use_templates = common_cfg.use_templates and "template_aatype" in tensors
+    if use_templates:
         no_templates = tensors["template_aatype"].shape[0] == 0
-
+        use_templates = not no_templates
+    
+    # If templates are not available, disable template-related features
+    if not use_templates:
+        common_cfg = copy.deepcopy(common_cfg)
+        common_cfg.use_templates = False
+        common_cfg.use_template_torsion_angles = False
     
     nonensembled = nonensembled_transform_fns(
         common_cfg,
