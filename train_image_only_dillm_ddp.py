@@ -220,17 +220,17 @@ class MemoryEfficientEMA:
 # 只在rank 0进程执行目录清理和创建
 if local_rank == 0:
     try:
-        rmtree('./results_dillm/train_image_only_dillm', ignore_errors = True)
-        results_folder = Path('./results_dillm/train_image_only_dillm')
+        rmtree('./results_llmflow/train_image_only_dillm', ignore_errors = True)
+        results_folder = Path('./results_llmflow/train_image_only_dillm')
         results_folder.mkdir(exist_ok = True, parents = True)
         print(f"Results folder created at {results_folder.absolute()}")
     except Exception as e:
         print(f"Error creating results folder: {e}")
         # 尝试在当前目录创建
-        results_folder = Path('./results_dillm/train_image_only_dillm')
+        results_folder = Path('./results_llmflow/train_image_only_dillm')
         results_folder.mkdir(exist_ok = True, parents = True)
 else:
-    results_folder = Path('./results_dillm/train_image_only_dillm')
+    results_folder = Path('./results_llmflow/train_image_only_dillm')
 
 # functions
 

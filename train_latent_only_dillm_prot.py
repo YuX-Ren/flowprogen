@@ -103,8 +103,8 @@ vae.to(device)
 
 # results folder
 
-rmtree('./results_dillm/train_latent_only_dillm_prot', ignore_errors = True)
-results_folder = Path('./results_dillm/train_latent_only_dillm_prot')
+rmtree('./results_llmflow/train_latent_only_dillm_prot', ignore_errors = True)
+results_folder = Path('./results_llmflow/train_latent_only_dillm_prot')
 results_folder.mkdir(exist_ok = True, parents = True)
 
 # constants

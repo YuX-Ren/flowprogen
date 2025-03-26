@@ -47,8 +47,8 @@ wandb.init(
     name=RUN_NAME,
 )
 device = torch.device('cuda:0')
-rmtree(f'./results_dillm/{RUN_NAME}', ignore_errors = True)
-results_folder = Path(f'./results_dillm/{RUN_NAME}')
+rmtree(f'./results_llmflow/{RUN_NAME}', ignore_errors = True)
+results_folder = Path(f'./results_llmflow/{RUN_NAME}')
 results_folder.mkdir(exist_ok = True, parents = True)
 
 

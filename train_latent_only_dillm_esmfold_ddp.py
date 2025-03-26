@@ -116,11 +116,11 @@ if not is_distributed or rank == 0:
         project="dillm", 
         name="train_latent_only_dillm_esmfold_ddp",
     )
-    rmtree('./results_dillm/train_latent_only_dillm_esmfold', ignore_errors = True)
-    results_folder = Path('./results_dillm/train_latent_only_dillm_esmfold')
+    rmtree('./results_llmflow/train_latent_only_dillm_esmfold', ignore_errors = True)
+    results_folder = Path('./results_llmflow/train_latent_only_dillm_esmfold')
     results_folder.mkdir(exist_ok = True, parents = True)
 else:
-    results_folder = Path('./results_dillm/train_latent_only_dillm_esmfold')
+    results_folder = Path('./results_llmflow/train_latent_only_dillm_esmfold')
 
 # constants
 SAMPLE_EVERY = 100

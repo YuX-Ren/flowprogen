@@ -16,8 +16,8 @@ from torchvision.utils import save_image
 
 from llmflow import LLMFlow, print_modality_sample
 
-rmtree('./results_dillm/train_image_only_dillmv2', ignore_errors = True)
-results_folder = Path('./results_dillm/train_image_only_dillmv2')
+rmtree('./results_llmflow/train_image_only_dillmv2', ignore_errors = True)
+results_folder = Path('./results_llmflow/train_image_only_dillmv2')
 results_folder.mkdir(exist_ok = True, parents = True)
 device = torch.device('cuda:0')
 
