@@ -14,7 +14,7 @@ import torchvision
 import torchvision.transforms as T
 from torchvision.utils import save_image
 
-from llmflow import LLMFlow, print_modality_sample
+from flowprogen.llmflow import LLMFlow, print_modality_sample
 
 rmtree('./results_llmflow/train_image_only_dillmv2', ignore_errors = True)
 results_folder = Path('./results_llmflow/train_image_only_dillmv2')

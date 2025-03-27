@@ -16,7 +16,7 @@
 import copy
 from functools import partial
 import json, tqdm
-from llmflow.utils.logging import get_logger
+from flowprogen.utils.logging import get_logger
 logger = get_logger(__name__)
 import pickle
 import time
@@ -29,8 +29,8 @@ import pytorch_lightning as pl
 import torch
 
 from openfold.data import mmcif_parsing
-from llmflow.data import data_pipeline, feature_pipeline
-from llmflow.utils.tensor_utils import tensor_tree_map, dict_multimap
+from flowprogen.data import data_pipeline, feature_pipeline
+from flowprogen.utils.tensor_utils import tensor_tree_map, dict_multimap
 
 
 class OpenFoldSingleDataset(torch.utils.data.Dataset):
@@ -313,7 +313,7 @@ class OpenFoldDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         dataset_idx, datapoint_idx = self.datapoints[idx]
-        print(f"dataset_idx: {dataset_idx}, datapoint_idx: {datapoint_idx}")
+        # print(f"dataset_idx: {dataset_idx}, datapoint_idx: {datapoint_idx}")
         return self.datasets[dataset_idx][datapoint_idx]
 
     def __len__(self):

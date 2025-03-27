@@ -1,15 +1,15 @@
-from llmflow.utils.logging import get_logger
+from flowprogen.utils.logging import get_logger
 logger = get_logger(__name__)
 import torch, os, wandb, time
 import pandas as pd
 from torch import nn
 from .esmfold import ESMFold
 from .alphafold import AlphaFold
-from llmflow import LLMFlow,TransFlow
-import sys; sys.path.append('.')
-from llmflow.utils.loss import AlphaFoldLoss
-from llmflow.utils.diffusion import HarmonicPrior, rmsdalign
-from llmflow.utils import protein
+from flowprogen.llmflow import LLMFlow
+from flowprogen.transflow import TransFlow
+from flowprogen.utils.loss import AlphaFoldLoss
+from flowprogen.utils.diffusion import HarmonicPrior, rmsdalign
+from flowprogen.utils import protein
 
 from openfold.utils.loss import lddt_ca
 from openfold.utils.superimposition import superimpose
@@ -126,6 +126,7 @@ class ModelWrapper(pl.LightningModule):
         
     def training_step(self, batch, batch_idx, stage='train'):
         self.iter_step += 1
+        logger.info(f"Training step executed-1: iter_step={self.iter_step}, global_step={self.trainer.global_step}")
         device = batch["aatype"].device
         batch_size = batch['aatype'].shape[0]
         self.harmonic_prior.to(device)
@@ -283,7 +284,7 @@ class ModelWrapper(pl.LightningModule):
 
             log = gather_log(log, self.trainer.world_size)
             mean_log = get_log_mean(log)
-            mean_log.update({'epoch': self.trainer.current_epoch, 'step': self.trainer.global_step})
+            mean_log.update({'epoch1': self.trainer.current_epoch, 'step': self.trainer.global_step})
             if self.trainer.is_global_zero:
                 logger.info(str(mean_log))
                 if self.args.wandb:
@@ -305,7 +306,7 @@ class ModelWrapper(pl.LightningModule):
         log = {key: log[key] for key in log if "train_" in key}
         log = gather_log(log, self.trainer.world_size)
         mean_log = get_log_mean(log)
-        mean_log.update({'epoch': self.trainer.current_epoch, 'step': self.trainer.global_step})
+        mean_log.update({'epoch2': self.trainer.current_epoch, 'step': self.trainer.global_step})
             
         if self.trainer.is_global_zero:
             logger.info(str(mean_log))
@@ -521,7 +522,7 @@ class TransFlowWrapper(ModelWrapper):
         device = batch["aatype"].device
         batch_size = batch['aatype'].shape[0]
         self.harmonic_prior.to(device)
-
+        self.stage = stage
         result = self.model.forward_modality(
             modalities=batch,
             times=None,
@@ -531,14 +532,19 @@ class TransFlowWrapper(ModelWrapper):
         )
         if isinstance(result, tuple) and len(result) == 2:
             total_loss, (flow_loss, velocity_loss, recon_loss) = result
+            self.log('flow_loss', flow_loss)
+            self.log('velocity_loss', velocity_loss)
+            self.log('recon_loss', recon_loss)
+            return total_loss, (flow_loss, velocity_loss, recon_loss)
         else:
-
             total_loss = result
             flow_loss = total_loss * 0.9
             recon_loss = total_loss * 0.1
             print("Warning: forward_seq_coord didn't return loss breakdown, using approximations.")
+            self.log('flow_loss', flow_loss)
+            self.log('recon_loss', recon_loss)
+            return total_loss, (flow_loss, _, recon_loss)
         
-        return total_loss, (flow_loss, velocity_loss, recon_loss)
 
 class LLMFlowWrapper(ModelWrapper):
     def __init__(self, cfg, args, training=True):
@@ -546,7 +552,7 @@ class LLMFlowWrapper(ModelWrapper):
         self.save_hyperparameters()
         self.cfg = cfg
         self.args = args
-        # self.esm_model = ESMFoldWrapper(cfg, args, training=training)
+
         self.esm_model = ESMFold(cfg.model,
                 extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
         if args.ckpt is None:
@@ -587,21 +593,23 @@ class LLMFlowWrapper(ModelWrapper):
                 model=self.model, decay=cfg.ema.decay
             )
         
-        # Initialize training-related attributes
-        self.iter_step = 0
-        self.last_log_time = time.time()
         self._log = defaultdict(list)
-        
-        # Initialize harmonic prior and generator
+
         self.harmonic_prior = HarmonicPrior(cfg.data.train.crop_size)
         self.generator = torch.Generator().manual_seed(137)
+        self.last_log_time = time.time()
+        self.iter_step = 0
 
     def training_step(self, batch, batch_idx, stage='train'):
         self.iter_step += 1
+        logger.info(f"Training step executed-2: iter_step={self.iter_step}, global_step={self.trainer.global_step}")
         device = batch["aatype"].device
         batch_size = batch['aatype'].shape[0]
         self.harmonic_prior.to(device)
-
+        self.stage = stage
+        if self.args.distillation:
+            return self.disillation_training_step(batch)
+            
         result = self.model.forward_modality(
             modalities=batch,
             times=None,
@@ -609,16 +617,46 @@ class LLMFlowWrapper(ModelWrapper):
             return_loss=True,
             return_loss_breakdown=True
         )
+        mean_log = get_log_mean(self._log)
         if isinstance(result, tuple) and len(result) == 2:
             total_loss, (flow_loss, velocity_loss, recon_loss) = result
+    
+            mean_log.update({
+                'flow_loss': flow_loss,
+                'velocity_loss': velocity_loss,
+                'recon_loss': recon_loss
+            })
+            logger.info(f'total_loss: {total_loss}')
+            return total_loss, (flow_loss, velocity_loss, recon_loss)
         else:
-
             total_loss = result
             flow_loss = total_loss * 0.9
             recon_loss = total_loss * 0.1
             print("Warning: forward_seq_coord didn't return loss breakdown, using approximations.")
-        
-        return total_loss, (flow_loss, velocity_loss, recon_loss)
+            mean_log.update({
+                'flow_loss': flow_loss,
+                'recon_loss': recon_loss
+            })
+            return total_loss, (flow_loss, _, recon_loss)
+    def try_print_log(self):
+        step = self.iter_step if self.args.validate else self.trainer.global_step 
+        if (step + 1) % self.args.print_freq == 0:
+            log = self._log
+            log = {key: log[key] for key in log if "iter_" in key}
+            log = gather_log(log, self.trainer.world_size)
+            mean_log = get_log_mean(log)
+            mean_log.update({
+                'epoch3': self.trainer.current_epoch, 
+                'step': self.trainer.global_step,
+                'iter_step': self.iter_step
+            })
+            if self.trainer.is_global_zero:
+                logger.info(str(mean_log))
+                if self.args.wandb:
+                    wandb.log(mean_log)
+            for key in list(log.keys()):
+                if "iter_" in key:
+                    del self._log[key]
         
 class ESMFoldWrapper(ModelWrapper):
     def __init__(self, cfg, args, training=True):
@@ -643,9 +681,6 @@ class ESMFoldWrapper(ModelWrapper):
         self.generator = torch.Generator().manual_seed(137)
         self.last_log_time = time.time()
         self.iter_step = 0
-
-        self.evoformer_stack = self.model.trunk.blocks
-        self.structure_module = self.model.trunk.structure_module
 
 
 class AlphaFoldWrapper(ModelWrapper):

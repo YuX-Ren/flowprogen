@@ -12,9 +12,9 @@ from torch.nn import LayerNorm
 import esm
 from esm.data import Alphabet
 
-from llmflow.utils.logging import get_logger
+from flowprogen.utils.logging import get_logger
 logger = get_logger(__name__)
-from llmflow.utils.misc import (
+from flowprogen.utils.misc import (
     categorical_lddt,
     batch_encode_sequences,
     collate_dense_tensors,

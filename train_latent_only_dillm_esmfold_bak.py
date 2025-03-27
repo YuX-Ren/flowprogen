@@ -18,7 +18,7 @@ import torch.nn.functional as F
 
 from einops import rearrange
 
-from llmflow import LLMFlow, print_modality_sample
+from flowprogen.llmflow import LLMFlow, print_modality_sample
 
 # hf related
 from datasets import load_dataset
@@ -29,12 +29,11 @@ from Bio.PDB import *
 from Bio.PDB import PDBParser, PDBIO, Polypeptide
 from Bio.PDB.StructureBuilder import StructureBuilder
 
-import sys; sys.path.append('.')
 torch.set_float32_matmul_precision("high")
-from llmflow.model.esmfold import ESMFold
-from llmflow.model.trunk import FoldingTrunk
-from llmflow.config import model_config
-from llmflow.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
+from flowprogen.model.esmfold import ESMFold
+from flowprogen.model.trunk import FoldingTrunk
+from flowprogen.config import model_config
+from flowprogen.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
 
 from openfold.utils.exponential_moving_average import ExponentialMovingAverage
 from openfold.utils.feats import atom14_to_atom37, pseudo_beta_fn

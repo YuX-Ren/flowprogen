@@ -18,7 +18,7 @@ import torchvision
 import torchvision.transforms as T
 from torchvision.utils import save_image
 
-from llmflow import LLMFlow, print_modality_sample
+from flowprogen.llmflow import LLMFlow, print_modality_sample
 
 import wandb
 

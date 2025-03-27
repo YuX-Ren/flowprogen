@@ -1,7 +1,7 @@
-from llmflow.utils.parsing import parse_train_args
+from flowprogen.utils.parsing import parse_train_args
 args = parse_train_args()
 
-from llmflow.utils.logging import get_logger
+from flowprogen.utils.logging import get_logger
 logger = get_logger(__name__)
 import torch, tqdm, os, wandb
 import pandas as pd
@@ -10,13 +10,13 @@ from functools import partial
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from openfold.utils.exponential_moving_average import ExponentialMovingAverage
-from llmflow.model.wrapper import ESMFoldWrapper, AlphaFoldWrapper, LLMFlowWrapper, TransFlowWrapper
+from flowprogen.model.wrapper import ESMFoldWrapper, AlphaFoldWrapper, LLMFlowWrapper, TransFlowWrapper
 from openfold.utils.import_weights import import_jax_weights_
 
 torch.set_float32_matmul_precision("high")
-from llmflow.config import model_config
-from llmflow.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
-from llmflow.data.inference import CSVDataset, AlphaFoldCSVDataset
+from flowprogen.config import model_config
+from flowprogen.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
+from flowprogen.data.inference import CSVDataset, AlphaFoldCSVDataset
 
 config = model_config(
     'initial_training',
@@ -156,7 +156,6 @@ def main():
             model.ema = ExponentialMovingAverage(
                 model=model.model, decay=config.ema.decay
             ) # need to initialize EMA this way at the beginning
-    
     
     if args.validate:
         trainer.validate(model, val_loader, ckpt_path=args.ckpt)

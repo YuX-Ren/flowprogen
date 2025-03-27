@@ -1,4 +1,4 @@
-from llmflow.utils.parsing import parse_train_args
+from flowprogen.utils.parsing import parse_train_args
 args = parse_train_args()
 
 import os
@@ -12,12 +12,11 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader
 
-import sys; sys.path.append('.')
 # torch.set_float32_matmul_precision("high")
-from llmflow.config import model_config
-from llmflow.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
-from llmflow.model.wrapper import LLMFlowWrapper, TransFlowWrapper
-from llmflow.utils.logging import get_logger
+from flowprogen.config import model_config
+from flowprogen.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
+from flowprogen.model.wrapper import LLMFlowWrapper, TransFlowWrapper
+from flowprogen.utils.logging import get_logger
 logger = get_logger(__name__)
 
 

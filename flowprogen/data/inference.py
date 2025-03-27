@@ -5,7 +5,7 @@ from openfold.np import residue_constants
 from .data_pipeline import DataPipeline
 from .feature_pipeline import FeaturePipeline
 from openfold.data.data_transforms import make_atom14_masks
-import llmflow.utils.protein as protein
+import flowprogen.utils.protein as protein
 
 def seq_to_tensor(seq):
     unk_idx = residue_constants.restype_order_with_x["X"]

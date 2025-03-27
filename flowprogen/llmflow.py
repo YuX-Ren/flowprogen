@@ -23,7 +23,7 @@ from collections import defaultdict
 from random import randrange
 from itertools import count
 from functools import partial, wraps, cache
-from typing import NamedTuple, Callable, Literal
+from typing import NamedTuple, Callable, Literal, Dict
 
 import torch
 import torch.nn.functional as F
@@ -2164,7 +2164,7 @@ class LLMFlow(Module):
     @typecheck
     def forward_modality(
         self,
-        modalities: Float['b ...'],
+        modalities: dict[str, Float['b ...']] | Float['b ...'],
         times: Float['b'] | None = None,
         modality_type: int | None = None,
         encode_modality: bool = True,
@@ -2175,15 +2175,21 @@ class LLMFlow(Module):
     ) -> Scalar | Float['b ...']:
         requires_velocity_consistency = exists(velocity_consistency_ema_model)
 
-        # Handle the case where modalities is a dictionary
+        # Handle the case where modalities is a Dictionary
         if isinstance(modalities, dict):
             # Convert dictionary values to the correct device
             modalities = {
                 k: v.to(self.device) if isinstance(v, torch.Tensor) else v
                 for k, v in modalities.items()
             }
+            # Get batch size from the first tensor in the dictionary
+            batch_size = next(iter(modalities.values())).shape[0]
         elif isinstance(modalities, torch.Tensor):
             modalities = modalities.to(self.device)
+            batch_size = modalities.shape[0]
+        else:
+            raise ValueError(f"Expected modalities to be a tensor or dictionary, got {type(modalities)}")
+
         orig_modalities = modalities
 
         if self.num_modalities > 1:
@@ -2200,15 +2206,42 @@ class LLMFlow(Module):
                     # Handle the case where encoder requires pairwise_state
                     if hasattr(mod.encoder[modality_type], 'forward') and 'pairwise_state' in mod.encoder[modality_type].forward.__code__.co_varnames:
                         # Create a dummy pairwise_state if needed
-                        batch_size = modalities.shape[0]
-                        seq_len = modalities.shape[1]
-                        pairwise_state = torch.zeros((batch_size, seq_len, seq_len, 1), device=modalities.device)
-                        modalities = mod.encoder[modality_type](modalities, pairwise_state).detach()
+                        '''modalities.keys:
+                        dict_keys(['aatype', 'residue_index', 'seq_length', 'all_atom_positions', 'all_atom_mask', 'resolution', 'is_distillation', 'seq_mask', 'msa_mask', 'msa_row_mask', 'atom14_atom_exists', 'residx_atom14_to_atom37', 'residx_atom37_to_atom14', 'atom37_atom_exists', 'atom14_gt_exists', 'atom14_gt_positions', 'atom14_alt_gt_positions', 'atom14_alt_gt_exists', 'atom14_atom_is_ambiguous', 'rigidgroups_gt_frames', 'rigidgroups_gt_exists', 'rigidgroups_group_exists', 'rigidgroups_group_is_ambiguous', 'rigidgroups_alt_gt_frames', 'pseudo_beta', 'pseudo_beta_mask', 'backbone_rigid_tensor', 'backbone_rigid_mask', 'chi_angles_sin_cos', 'chi_mask', 'extra_msa', 'extra_msa_mask', 'extra_msa_row_mask', 'bert_mask', 'true_msa', 'extra_has_deletion', 'extra_deletion_value', 'msa_feat', 'target_feat', 'use_clamped_fape', 'name', 'seqres'])
+                        '''
+                        if isinstance(modalities, dict):
+                            # If modalities is a dict, we need to extract the sequence tensor
+                            # Assuming the sequence tensor has key 'sequence' or similar
+                            sequence_key = next(k for k in modalities.keys() if 'sequence_state' in k.lower())
+                            sequence_tensor = modalities[sequence_key]
+                            seq_len = sequence_tensor.shape[1]
+                        else:
+                            seq_len = modalities.shape[1]
+                            
+                        pairwise_state = torch.zeros((batch_size, seq_len, seq_len, 1), device=self.device)
+                        
+                        # Pass the sequence tensor to the encoder
+                        if isinstance(modalities, dict):
+                            modalities = mod.encoder[modality_type](sequence_tensor, pairwise_state).detach()
+                        else:
+                            modalities = mod.encoder[modality_type](modalities, pairwise_state).detach()
                     else:
-                        modalities = mod.encoder[modality_type](modalities).detach()
+                        # If no pairwise_state needed, handle dictionary input
+                        if isinstance(modalities, dict):
+                            sequence_key = next(k for k in modalities.keys() if 'sequence_state' in k.lower())
+                            sequence_tensor = modalities[sequence_key]
+                            modalities = mod.encoder[modality_type](sequence_tensor).detach()
+                        else:
+                            modalities = mod.encoder[modality_type](modalities).detach()
                 else:
                     mod.encoder.eval()
-                    modalities = mod.encoder(modalities).detach()
+                    # Handle dictionary input for non-ModuleList encoder
+                    if isinstance(modalities, dict):
+                        sequence_key = next(k for k in modalities.keys() if 'sequence_state' in k.lower())
+                        sequence_tensor = modalities[sequence_key]
+                        modalities = mod.encoder(sequence_tensor).detach()
+                    else:
+                        modalities = mod.encoder(modalities).detach()
 
         # shapes and device
         if isinstance(modalities, tuple):

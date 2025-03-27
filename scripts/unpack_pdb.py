@@ -11,8 +11,7 @@ import warnings, tqdm, os, io, logging
 import pandas as pd
 import numpy as np
 from multiprocessing import Pool
-import sys;sys.path.append('.')
-from llmflow.data.data_pipeline import DataPipeline
+from flowprogen.data.data_pipeline import DataPipeline
 from openfold.data import mmcif_parsing
 from Bio.PDB import PDBParser
 

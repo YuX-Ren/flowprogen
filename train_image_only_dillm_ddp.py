@@ -14,7 +14,7 @@ import torchvision
 import torchvision.transforms as T
 from torchvision.utils import save_image
 
-from llmflow import LLMFlow, print_modality_sample
+from flowprogen.llmflow import LLMFlow, print_modality_sample
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
@@ -250,7 +250,7 @@ class Decoder(Module):
         return ((x + 1) * 0.5).clamp(min = 0., max = 1.)
 
 # 修补LlamaTransformer类，确保time_mlp使用float16
-from llmflow.llmflow import LlamaTransformer
+from flowprogen.llmflow import LlamaTransformer
 def check_gradients(model, step):
     """检查模型梯度是否包含NaN或Inf值"""
     has_nan = False
