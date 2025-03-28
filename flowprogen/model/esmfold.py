@@ -439,3 +439,106 @@ class ESMFold(nn.Module):
     @property
     def device(self):
         return self.esm_s_combine.device
+
+    def get_encoder_outputs(self, batch, prev_outputs=None):
+        aa = batch['aatype']
+        mask = batch['seq_mask']
+        residx = batch['residue_index']
+        
+        # ESM语言模型部分
+        esmaa = self._af2_idx_to_esm_idx(aa, mask)
+        esm_s, esm_z = self._compute_language_model_representations(esmaa)
+        
+        # 特征处理
+        esm_s = esm_s.to(self.esm_s_combine.dtype)
+        esm_s = esm_s.detach()
+        esm_s = (self.esm_s_combine.softmax(0).unsqueeze(0) @ esm_s).squeeze(2)
+        s_s_0 = self.esm_s_mlp(esm_s)
+        s_s_0 += self.embedding(aa)
+        
+        # 配对特征处理
+        if 'noised_pseudo_beta_dists' in batch:
+            inp_z = self._get_input_pair_embeddings(
+                batch['noised_pseudo_beta_dists'], 
+                batch['pseudo_beta_mask']
+            )
+            inp_z = inp_z + self.input_time_embedding(self.input_time_projection(batch['t']))[:,None,None]
+        else:
+            B, L = batch['aatype'].shape
+            inp_z = self._get_input_pair_embeddings(
+                s_s_0.new_zeros(B, L, L), 
+                batch['pseudo_beta_mask'] * 0.0
+            )
+            inp_z = inp_z + self.input_time_embedding(self.input_time_projection(inp_z.new_zeros(B)))[:,None,None]
+        ##########################
+        #############################
+        if self.extra_input:
+            if 'extra_all_atom_positions' in batch:
+                extra_pseudo_beta = pseudo_beta_fn(batch['aatype'], batch['extra_all_atom_positions'], None)
+                extra_pseudo_beta_dists = torch.sum((extra_pseudo_beta.unsqueeze(-2) - extra_pseudo_beta.unsqueeze(-3)) ** 2, dim=-1)**0.5
+                extra_inp_z = self._get_extra_input_pair_embeddings(
+                    extra_pseudo_beta_dists, 
+                    batch['pseudo_beta_mask'],
+                )
+                
+            else: # otherwise DDP complains
+                B, L = batch['aatype'].shape
+                extra_inp_z = self._get_extra_input_pair_embeddings(
+                    inp_z.new_zeros(B, L, L), 
+                    inp_z.new_zeros(B, L),
+                ) * 0.0
+    
+            inp_z = inp_z + extra_inp_z
+        ########################
+
+        s_z_0 = inp_z
+        if prev_outputs is not None:
+            s_s_0 = s_s_0 + self.trunk.recycle_s_norm(prev_outputs['s_s'])
+            s_z_0 = s_z_0 + self.trunk.recycle_z_norm(prev_outputs['s_z'])
+            s_z_0 = s_z_0 + self.trunk.recycle_disto(FoldingTrunk.distogram(
+                prev_outputs['sm']["positions"][-1][:, :, :3],
+                3.375,
+                21.375,
+                self.trunk.recycle_bins,
+            ))
+
+        else:
+            s_s_0 = s_s_0 + self.trunk.recycle_s_norm(torch.zeros_like(s_s_0)) * 0.0
+            s_z_0 = s_z_0 + self.trunk.recycle_z_norm(torch.zeros_like(s_z_0)) * 0.0
+            s_z_0 = s_z_0 + self.trunk.recycle_disto(s_z_0.new_zeros(s_z_0.shape[:-2], dtype=torch.long)) * 0.0
+        
+        return s_s_0, s_z_0
+
+    def get_decoder_outputs(self, s_s_0, s_z_0, batch):
+        aa = batch['aatype']
+        mask = batch['seq_mask']
+        residx = batch['residue_index']
+        
+        # 主干网络处理
+        structure = self.trunk(
+            s_s_0, s_z_0, aa, residx, mask, no_recycles=0
+        )
+        
+        # 输出头处理
+        disto_logits = self.distogram_head(structure["s_z"])
+        disto_logits = (disto_logits + disto_logits.transpose(1, 2)) / 2
+        structure["distogram_logits"] = disto_logits
+        
+        # 其他处理
+        structure["aatype"] = aa
+        make_atom14_masks(structure)
+        
+        for k in ["atom14_atom_exists", "atom37_atom_exists"]:
+            structure[k] *= mask.unsqueeze(-1)
+        structure["residue_index"] = residx
+        
+        # LDDT预测
+        lddt_head = self.lddt_head(structure['sm']["single"])
+        structure["lddt_logits"] = lddt_head
+        plddt = categorical_lddt(lddt_head, bins=self.lddt_bins)
+        structure["plddt"] = 100 * plddt
+        
+        structure["final_atom_positions"] = atom14_to_atom37(structure["sm"]["positions"][-1], batch)
+        structure["final_affine_tensor"] = structure["sm"]["frames"][-1]
+        if "name" in batch: structure["name"] = batch["name"]
+        return structure

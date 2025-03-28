@@ -1445,9 +1445,9 @@ class LLMFlow(Module):
             f"Expected {self.num_modalities} decoders, got {len(self.modality_decoder)}"
 
         # 修改2: 单模态专用处理
-        if self.num_modalities == 1:
-            self.single_modality_encoder = self.modality_encoder[0]
-            self.single_modality_decoder = self.modality_decoder[0]
+        # if self.num_modalities == 1:
+        #     self.single_modality_encoder = self.modality_encoder[0]
+        #     self.single_modality_decoder = self.modality_decoder[0]
 
         # auto handle batch dimension for modality encoder / decoder
 

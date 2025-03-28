@@ -1006,10 +1006,12 @@ class Transformer(Module):
         attn_laser = False,
         unet_skips = True,
         use_flex_attn = False,
-        num_residual_streams = 4
+        num_residual_streams = 4,
+        use_gradient_checkpointing = False
     ):
         super().__init__()
         self.use_flex_attn = use_flex_attn
+        self.use_gradient_checkpointing = use_gradient_checkpointing
 
         self.dim = dim
         self.dim_head = dim_head
@@ -1055,6 +1057,27 @@ class Transformer(Module):
 
         self.layers = layers
         self.norm = RMSNorm(dim)
+        
+    #     # Enable gradient checkpointing if requested
+    #     if use_gradient_checkpointing:
+    #         self._enable_gradient_checkpointing()
+            
+    # def _enable_gradient_checkpointing(self):
+    #     def create_custom_forward(module):
+    #         def custom_forward(*args, **kwargs):
+    #             return module(*args, **kwargs)
+    #         return custom_forward
+            
+    #     # Apply gradient checkpointing to each layer
+    #     for i, layer in enumerate(self.layers):
+    #         # Skip the first element (skip_proj) as it might be None
+    #         for j in range(1, len(layer)):
+    #             if hasattr(layer[j], 'forward'):
+    #                 layer[j]._original_forward = layer[j].forward
+    #                 layer[j].forward = torch.utils.checkpoint.checkpoint(
+    #                     create_custom_forward(layer[j]._original_forward),
+    #                     use_reentrant=False
+    #                 )
 
     @typecheck
     def forward(
@@ -1927,7 +1950,57 @@ class TransFlow(Module):
     ) -> Scalar | Float['b ...']:
         requires_velocity_consistency = exists(velocity_consistency_ema_model)
 
-        modalities = modalities.to(self.device)
+        if isinstance(modalities, dict):
+            # Assuming modalities is a dictionary, and values could be lists or tensors
+            modalities = {key: value.to(self.device) if isinstance(value, torch.Tensor) else value for key, value in modalities.items()}
+            '''
+            modalities contain the following keys:
+                aatype <class 'torch.Tensor'>
+                residue_index <class 'torch.Tensor'>
+                seq_length <class 'torch.Tensor'>
+                all_atom_positions <class 'torch.Tensor'>
+                all_atom_mask <class 'torch.Tensor'>
+                resolution <class 'torch.Tensor'>
+                is_distillation <class 'torch.Tensor'>
+                seq_mask <class 'torch.Tensor'>
+                msa_mask <class 'torch.Tensor'>
+                msa_row_mask <class 'torch.Tensor'>
+                atom14_atom_exists <class 'torch.Tensor'>
+                residx_atom14_to_atom37 <class 'torch.Tensor'>
+                residx_atom37_to_atom14 <class 'torch.Tensor'>
+                atom37_atom_exists <class 'torch.Tensor'>
+                atom14_gt_exists <class 'torch.Tensor'>
+                atom14_gt_positions <class 'torch.Tensor'>
+                atom14_alt_gt_positions <class 'torch.Tensor'>
+                atom14_alt_gt_exists <class 'torch.Tensor'>
+                atom14_atom_is_ambiguous <class 'torch.Tensor'>
+                rigidgroups_gt_frames <class 'torch.Tensor'>
+                rigidgroups_gt_exists <class 'torch.Tensor'>
+                rigidgroups_group_exists <class 'torch.Tensor'>
+                rigidgroups_group_is_ambiguous <class 'torch.Tensor'>
+                rigidgroups_alt_gt_frames <class 'torch.Tensor'>
+                pseudo_beta <class 'torch.Tensor'>
+                pseudo_beta_mask <class 'torch.Tensor'>
+                backbone_rigid_tensor <class 'torch.Tensor'>
+                backbone_rigid_mask <class 'torch.Tensor'>
+                chi_angles_sin_cos <class 'torch.Tensor'>
+                chi_mask <class 'torch.Tensor'>
+                extra_msa <class 'torch.Tensor'>
+                extra_msa_mask <class 'torch.Tensor'>
+                extra_msa_row_mask <class 'torch.Tensor'>
+                bert_mask <class 'torch.Tensor'>
+                true_msa <class 'torch.Tensor'>
+                extra_has_deletion <class 'torch.Tensor'>
+                extra_deletion_value <class 'torch.Tensor'>
+                msa_feat <class 'torch.Tensor'>
+                target_feat <class 'torch.Tensor'>
+                use_clamped_fape <class 'torch.Tensor'>
+                name <class 'list'>
+                seqres <class 'list'>
+            '''
+        else:
+            modalities = modalities.to(self.device)
+        
         orig_modalities = modalities
 
         if self.num_modalities > 1:
@@ -1939,16 +2012,36 @@ class TransFlow(Module):
 
         # maybe modality encode
 
+
         if encode_modality and exists(mod.encoder):
             with torch.no_grad():
                 mod.encoder.eval()
-                modalities = mod.encoder(modalities).detach()
-
+                mod.decoder.eval()
+                s_s_0, s_z_0 = mod.encoder.get_encoder_outputs(modalities, prev_outputs=None)
+                modalities = mod.decoder.get_decoder_outputs(s_s_0, s_z_0, modalities) # the output modalities here is structure
+                '''
+                modalities contain the following keys:
+                    'sm', 's_s', 's_z', 
+                    'distogram_logits', 
+                    'aatype', 
+                    'atom14_atom_exists', 
+                    'residx_atom14_to_atom37', 
+                    'residx_atom37_to_atom14', 
+                    'atom37_atom_exists', 
+                    'residue_index', 
+                    'lddt_logits', 
+                    'plddt', 
+                    'final_atom_positions', 
+                    'final_affine_tensor', 
+                    'name'
+                '''
         # shapes and device
-
-        tokens = modalities
+        # tokens = modalities
+        tokens = modalities['s_z'] #torch.Size([1, 256, 256, 128])
+        
 
         batch, device = tokens.shape[0], tokens.device
+        seq_length = modalities['aatype'].shape[1]
 
         # times
 
@@ -1973,9 +2066,9 @@ class TransFlow(Module):
             noised_tokens = tokens
 
         # from latent to model tokens
-
+        # before this, noised_tokens is torch.Size([1, 256, 256, 128])
         noised_tokens = mod.latent_to_model(noised_tokens)
-
+        # after this, noised_tokens is torch.Size([1, 256, 256, 256])
         # axial positions
 
         if mod.add_pos_emb:
@@ -1988,11 +2081,11 @@ class TransFlow(Module):
         # maybe transform
 
         noised_tokens, inverse_pack_axial_dims = pack_one_with_inverse(noised_tokens, 'b * d')
-
+        # after this, noised_tokens is torch.Size([1, 65536, 256])
         # maybe add axial pos emb
 
         if mod.add_pos_emb:
-            axial_pos_emb = mod.pos_emb_mlp(tensor(axial_dims), flatten = True)
+            axial_pos_emb = mod.pos_emb_mlp(tensor(axial_dims), flatten = True) # should be torch.Size([65536, 256])
             noised_tokens = noised_tokens + axial_pos_emb
 
         # attention

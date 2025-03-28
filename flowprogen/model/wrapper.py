@@ -126,7 +126,6 @@ class ModelWrapper(pl.LightningModule):
         
     def training_step(self, batch, batch_idx, stage='train'):
         self.iter_step += 1
-        logger.info(f"Training step executed-1: iter_step={self.iter_step}, global_step={self.trainer.global_step}")
         device = batch["aatype"].device
         batch_size = batch['aatype'].shape[0]
         self.harmonic_prior.to(device)
@@ -284,7 +283,7 @@ class ModelWrapper(pl.LightningModule):
 
             log = gather_log(log, self.trainer.world_size)
             mean_log = get_log_mean(log)
-            mean_log.update({'epoch1': self.trainer.current_epoch, 'step': self.trainer.global_step})
+            mean_log.update({'epoch': self.trainer.current_epoch, 'step': self.trainer.global_step})
             if self.trainer.is_global_zero:
                 logger.info(str(mean_log))
                 if self.args.wandb:
@@ -306,7 +305,7 @@ class ModelWrapper(pl.LightningModule):
         log = {key: log[key] for key in log if "train_" in key}
         log = gather_log(log, self.trainer.world_size)
         mean_log = get_log_mean(log)
-        mean_log.update({'epoch2': self.trainer.current_epoch, 'step': self.trainer.global_step})
+        mean_log.update({'epoch': self.trainer.current_epoch, 'step': self.trainer.global_step})
             
         if self.trainer.is_global_zero:
             logger.info(str(mean_log))
@@ -462,202 +461,9 @@ class ModelWrapper(pl.LightningModule):
             }
         }
 
-class TransFlowWrapper(ModelWrapper):
-    def __init__(self, cfg, args, training=True):
-        super().__init__()
-        self.save_hyperparameters()
-        self.cfg = cfg
-        self.args = args
-        self.esm_model = ESMFold(cfg.model,
-                extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
-        if args.ckpt is None:
-            print("Loading the model esmfold")
-            path = "/share/project/xiaohongwang/Routine_ckpts/esm_pretrained_models/esm2_t33_650M_UR50D.pt"
-            model_data = torch.load(path)
-            model_state = model_data["model"]
-            self.esm_model.load_state_dict(model_state, strict=False)
-            print("Model esmfold has been loaded")
-        
-        self.evoformer_stack = self.esm_model.trunk.blocks
-        self.structure_module = self.esm_model.trunk.structure_module
-        self.model = TransFlow(
-            num_text_tokens = 21,  # Number of amino acids
-            dim_latent = 21,  # Latent dimension for protein representation
-            channel_first_latent = False,  # Protein data is not channel-first
-            modality_default_shape = (512,),  # Maximum sequence length
-            modality_encoder = self.evoformer_stack,
-            modality_decoder = self.structure_module,
-            pre_post_transformer_enc_dec = (
-                nn.Linear(21, 2048),  # Adapt latent dimension to transformer dimension
-                nn.Linear(2048, 21),
-            ),
-            add_pos_emb = True,  # Important for sequence data
-            modality_num_dim = 1,  # 1D sequence data
-            fallback_to_default_shape_if_invalid = True,
-            reconstruction_loss_weight = 1.0,
-            transformer = dict(
-                dim = 256,
-                depth = 8,
-                dim_head = 64,
-                heads = 8
-            )
-        )
-        
-        if not args.no_ema:
-            self.ema = ExponentialMovingAverage(
-                model=self.model, decay=cfg.ema.decay
-            )
-        
-        # Initialize training-related attributes
-        self.iter_step = 0
-        self.last_log_time = time.time()
-        self._log = defaultdict(list)
-        
-        # Initialize harmonic prior and generator
-        self.harmonic_prior = HarmonicPrior(cfg.data.train.crop_size)
-        self.generator = torch.Generator().manual_seed(137)
-
-    def training_step(self, batch, batch_idx, stage='train'):
-        self.iter_step += 1
-        device = batch["aatype"].device
-        batch_size = batch['aatype'].shape[0]
-        self.harmonic_prior.to(device)
-        self.stage = stage
-        result = self.model.forward_modality(
-            modalities=batch,
-            times=None,
-            modality_type=0,
-            return_loss=True,
-            return_loss_breakdown=True
-        )
-        if isinstance(result, tuple) and len(result) == 2:
-            total_loss, (flow_loss, velocity_loss, recon_loss) = result
-            self.log('flow_loss', flow_loss)
-            self.log('velocity_loss', velocity_loss)
-            self.log('recon_loss', recon_loss)
-            return total_loss, (flow_loss, velocity_loss, recon_loss)
-        else:
-            total_loss = result
-            flow_loss = total_loss * 0.9
-            recon_loss = total_loss * 0.1
-            print("Warning: forward_seq_coord didn't return loss breakdown, using approximations.")
-            self.log('flow_loss', flow_loss)
-            self.log('recon_loss', recon_loss)
-            return total_loss, (flow_loss, _, recon_loss)
-        
-
-class LLMFlowWrapper(ModelWrapper):
-    def __init__(self, cfg, args, training=True):
-        super().__init__()
-        self.save_hyperparameters()
-        self.cfg = cfg
-        self.args = args
-
-        self.esm_model = ESMFold(cfg.model,
-                extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
-        if args.ckpt is None:
-            print("Loading the model esmfold")
-            path = "/share/project/xiaohongwang/Routine_ckpts/esm_pretrained_models/esm2_t33_650M_UR50D.pt"
-            model_data = torch.load(path)
-            model_state = model_data["model"]
-            self.esm_model.load_state_dict(model_state, strict=False)
-            print("Model esmfold has been loaded")
-        
-        self.evoformer_stack = self.esm_model.trunk.blocks
-        self.structure_module = self.esm_model.trunk.structure_module
-        self.model = LLMFlow(
-            num_text_tokens = 21,  # Number of amino acids
-            dim_latent = 21,  # Latent dimension for protein representation
-            channel_first_latent = False,  # Protein data is not channel-first
-            modality_default_shape = (512,),  # Maximum sequence length
-            modality_encoder = self.evoformer_stack,
-            modality_decoder = self.structure_module,
-            pre_post_transformer_enc_dec = (
-                nn.Linear(21, 2048),  # Adapt latent dimension to transformer dimension
-                nn.Linear(2048, 21),
-            ),
-            add_pos_emb = True,  # Important for sequence data
-            modality_num_dim = 1,  # 1D sequence data
-            fallback_to_default_shape_if_invalid = True,
-            reconstruction_loss_weight = 1.0,
-            transformer={
-                'use_llama': True,
-                'dim': 2048,
-                'model_name_or_path': '/share/project/xiaohongwang/LLM_checkpoints/Llama3.2/Llama-3.2-1B-Instruct',
-                'use_gradient_checkpointing': True
-            },
-        )
-        
-        if not args.no_ema:
-            self.ema = ExponentialMovingAverage(
-                model=self.model, decay=cfg.ema.decay
-            )
-        
-        self._log = defaultdict(list)
-
-        self.harmonic_prior = HarmonicPrior(cfg.data.train.crop_size)
-        self.generator = torch.Generator().manual_seed(137)
-        self.last_log_time = time.time()
-        self.iter_step = 0
-
-    def training_step(self, batch, batch_idx, stage='train'):
-        self.iter_step += 1
-        logger.info(f"Training step executed-2: iter_step={self.iter_step}, global_step={self.trainer.global_step}")
-        device = batch["aatype"].device
-        batch_size = batch['aatype'].shape[0]
-        self.harmonic_prior.to(device)
-        self.stage = stage
-        if self.args.distillation:
-            return self.disillation_training_step(batch)
-            
-        result = self.model.forward_modality(
-            modalities=batch,
-            times=None,
-            modality_type=0,
-            return_loss=True,
-            return_loss_breakdown=True
-        )
-        mean_log = get_log_mean(self._log)
-        if isinstance(result, tuple) and len(result) == 2:
-            total_loss, (flow_loss, velocity_loss, recon_loss) = result
     
-            mean_log.update({
-                'flow_loss': flow_loss,
-                'velocity_loss': velocity_loss,
-                'recon_loss': recon_loss
-            })
-            logger.info(f'total_loss: {total_loss}')
-            return total_loss, (flow_loss, velocity_loss, recon_loss)
-        else:
-            total_loss = result
-            flow_loss = total_loss * 0.9
-            recon_loss = total_loss * 0.1
-            print("Warning: forward_seq_coord didn't return loss breakdown, using approximations.")
-            mean_log.update({
-                'flow_loss': flow_loss,
-                'recon_loss': recon_loss
-            })
-            return total_loss, (flow_loss, _, recon_loss)
-    def try_print_log(self):
-        step = self.iter_step if self.args.validate else self.trainer.global_step 
-        if (step + 1) % self.args.print_freq == 0:
-            log = self._log
-            log = {key: log[key] for key in log if "iter_" in key}
-            log = gather_log(log, self.trainer.world_size)
-            mean_log = get_log_mean(log)
-            mean_log.update({
-                'epoch3': self.trainer.current_epoch, 
-                'step': self.trainer.global_step,
-                'iter_step': self.iter_step
-            })
-            if self.trainer.is_global_zero:
-                logger.info(str(mean_log))
-                if self.args.wandb:
-                    wandb.log(mean_log)
-            for key in list(log.keys()):
-                if "iter_" in key:
-                    del self._log[key]
-        
+
+
 class ESMFoldWrapper(ModelWrapper):
     def __init__(self, cfg, args, training=True):
         super().__init__()
@@ -706,4 +512,228 @@ class AlphaFoldWrapper(ModelWrapper):
         self.last_log_time = time.time()
         self.iter_step = 0
 
-   
+
+class TransFlowWrapper(ModelWrapper):
+    def __init__(self, cfg, args, training=True):
+        super().__init__()
+        self.save_hyperparameters()
+        self.cfg = cfg
+        self.args = args
+        self.esm_model = ESMFold(cfg.model,
+                extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
+        if args.ckpt is None:
+            print("Loading the model esmfold")
+            path = "/share/project/xiaohongwang/Routine_ckpts/esm_pretrained_models/esm2_t33_650M_UR50D.pt"
+            model_data = torch.load(path)
+            model_state = model_data["model"]
+            self.esm_model.load_state_dict(model_state, strict=False)
+            print("Model esmfold has been loaded")
+        
+        self.encoder = self.esm_model
+        self.decoder = self.esm_model
+        self.model = TransFlow(
+            num_text_tokens = 21,  # Number of amino acids
+            dim_latent = 128,
+            channel_first_latent = False,  # Protein data is not channel-first
+            modality_default_shape = (256, 256),  # Maximum sequence length
+            modality_encoder = self.encoder,
+            modality_decoder = self.decoder,
+            # pre_post_transformer_enc_dec = (
+            #     nn.Linear(21, 256),  # Adapt latent dimension to transformer dimension
+            #     nn.Linear(256, 21),
+            # ),
+            add_pos_emb = True,
+            modality_num_dim = 2,
+            fallback_to_default_shape_if_invalid = True,
+            reconstruction_loss_weight = 1.0,
+            transformer = dict(
+                dim = 256,
+                depth = 8,
+                dim_head = 64,
+                heads = 8,
+                use_gradient_checkpointing = True
+            )
+        )
+        
+        if not args.no_ema:
+            self.ema = ExponentialMovingAverage(
+                model=self.model, decay=cfg.ema.decay
+            )
+        
+        self._log = defaultdict(list)
+
+        self.harmonic_prior = HarmonicPrior(cfg.data.train.crop_size)
+        self.generator = torch.Generator().manual_seed(137)
+        self.last_log_time = time.time()
+        self.iter_step = 0
+
+    def training_step(self, batch, batch_idx, stage='train'):
+        self.iter_step += 1
+        device = batch["aatype"].device
+        batch_size = batch['aatype'].shape[0]
+        self.harmonic_prior.to(device)
+        self.stage = stage
+        result = self.model.forward_modality(
+            modalities=batch,
+            times=None,
+            modality_type=0,
+            return_loss=True,
+            return_loss_breakdown=True
+        )
+        if isinstance(result, tuple) and len(result) == 2:
+            total_loss, (flow_loss, velocity_loss, recon_loss) = result
+            self.log('flow_loss', flow_loss)
+            self.log('velocity_loss', velocity_loss)
+            self.log('recon_loss', recon_loss)
+            return total_loss, (flow_loss, velocity_loss, recon_loss)
+        else:
+            total_loss = result
+            flow_loss = total_loss * 0.9
+            recon_loss = total_loss * 0.1
+            print("Warning: forward_seq_coord didn't return loss breakdown, using approximations.")
+            self.log('flow_loss', flow_loss)
+            self.log('recon_loss', recon_loss)
+            return total_loss, (flow_loss, _, recon_loss)
+        
+
+class LLMFlowWrapper(ModelWrapper):
+    def __init__(self, cfg, args, training=True):
+        super().__init__()
+        self.save_hyperparameters()
+        self.cfg = cfg
+        self.args = args
+
+        self.esm_model = ESMFold(cfg.model,
+                extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
+        if args.ckpt is None:
+            print("Loading the model esmfold")
+            path = "/share/project/xiaohongwang/Routine_ckpts/esm_pretrained_models/esm2_t33_650M_UR50D.pt"
+            model_data = torch.load(path)
+            model_state = model_data["model"]
+            self.esm_model.load_state_dict(model_state, strict=False)
+            print("Model esmfold has been loaded")
+        
+        self.evoformer_stack = self.esm_model.trunk
+        self.structure_module = self.esm_model.trunk.structure_module
+        self.model = LLMFlow(
+            num_text_tokens = 21,  # Number of amino acids
+            dim_latent = 21,  # Latent dimension for protein representation
+            channel_first_latent = False,  # Protein data is not channel-first
+            modality_default_shape = (512,),  # Maximum sequence length
+            modality_encoder = self.evoformer_stack,
+            modality_decoder = self.structure_module,
+            pre_post_transformer_enc_dec = (
+                nn.Linear(21, 2048),  # Adapt latent dimension to transformer dimension
+                nn.Linear(2048, 21),
+            ),
+            add_pos_emb = True,  # Important for sequence data
+            modality_num_dim = 1,  # 1D sequence data
+            fallback_to_default_shape_if_invalid = True,
+            reconstruction_loss_weight = 1.0,
+            transformer={
+                'use_llama': True,
+                'dim': 2048,
+                'model_name_or_path': '/share/project/xiaohongwang/LLM_checkpoints/Llama3.2/Llama-3.2-1B-Instruct',
+                'use_gradient_checkpointing': True
+            },
+        )
+        
+        if not args.no_ema:
+            self.ema = ExponentialMovingAverage(
+                model=self.model, decay=cfg.ema.decay
+            )
+        
+        self._log = defaultdict(list)
+
+        self.harmonic_prior = HarmonicPrior(cfg.data.train.crop_size)
+        self.generator = torch.Generator().manual_seed(137)
+        self.last_log_time = time.time()
+        self.iter_step = 0
+
+    def training_step(self, batch, batch_idx, stage='train'):
+        self.iter_step += 1
+        device = batch["aatype"].device
+        batch_size = batch['aatype'].shape[0]
+        self.harmonic_prior.to(device)
+        self.stage = stage
+        if self.args.distillation:
+            return self.disillation_training_step(batch)
+        import pdb; pdb.set_trace()
+        print('batch:', batch['aatype'].shape)
+        result = self.model.forward_modality(
+            modalities=batch,
+            times=None,
+            modality_type=0,
+            return_loss=True,
+            return_loss_breakdown=True
+        )
+
+        mean_log = get_log_mean(self._log)
+        if isinstance(result, tuple) and len(result) == 2:
+            total_loss, (flow_loss, velocity_loss, recon_loss) = result
+    
+            mean_log.update({
+                'flow_loss': flow_loss,
+                'velocity_loss': velocity_loss,
+                'recon_loss': recon_loss
+            })
+            return total_loss, (flow_loss, velocity_loss, recon_loss)
+        else:
+            total_loss = result
+            flow_loss = total_loss * 0.9
+            recon_loss = total_loss * 0.1
+            print("Warning: forward_modality didn't return loss breakdown, using approximations.")
+            mean_log.update({
+                'flow_loss': flow_loss,
+                'recon_loss': recon_loss
+            })
+            return total_loss, (flow_loss, _, recon_loss)
+        return total_loss
+    
+    def try_print_log(self):
+        step = self.iter_step if self.args.validate else self.trainer.global_step 
+        if (step + 1) % self.args.print_freq == 0:
+            log = self._log
+            log = {key: log[key] for key in log if "iter_" in key}
+            log = gather_log(log, self.trainer.world_size)
+            mean_log = get_log_mean(log)
+            mean_log.update({
+                'epoch3': self.trainer.current_epoch, 
+                'step': self.trainer.global_step,
+                'iter_step': self.iter_step
+            })
+            if self.trainer.is_global_zero:
+                logger.info(str(mean_log))
+                if self.args.wandb:
+                    wandb.log(mean_log)
+            for key in list(log.keys()):
+                if "iter_" in key:
+                    del self._log[key]
+
+    def log(self, key, data):
+        if isinstance(data, torch.Tensor):
+            data = data.cpu().numpy()
+        log = self._log
+        if self.stage == 'train' or self.args.validate:
+            log["iter_" + key].extend(data)
+        log[self.stage + "_" + key].extend(data)
+
+    def on_train_epoch_end(self):
+        log = self._log
+        log = {key: log[key] for key in log if "train_" in key}
+        log = gather_log(log, self.trainer.world_size)
+        mean_log = get_log_mean(log)
+        mean_log.update({'epoch2': self.trainer.current_epoch, 'step': self.trainer.global_step})
+            
+        if self.trainer.is_global_zero:
+            logger.info(str(mean_log))
+            if self.args.wandb:
+                wandb.log(mean_log)
+
+            path = os.path.join(
+                os.environ["MODEL_DIR"], f"train_{self.trainer.current_epoch}.csv"
+            )
+            pd.DataFrame(log).to_csv(path)
+        for key in list(log.keys()):
+            if "train_" in key:
+                del self._log[key]

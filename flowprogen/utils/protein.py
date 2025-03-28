@@ -6,7 +6,8 @@ from openfold.np import residue_constants
 from flowprogen.utils.tensor_utils import tensor_tree_map
 import subprocess, tempfile, os, dataclasses
 import numpy as np
-from Bio import pairwise2
+# from Bio import pairwise2
+from Bio.Align import PairwiseAligner
 
 @dataclasses.dataclass(repr=False)
 class Protein:
@@ -169,7 +170,8 @@ def align_residue_numbering(prot1, prot2, mask=False):
     prot1 = Protein(**prot1.__dict__)
     prot2 = Protein(**prot2.__dict__)
     
-    alignment = pairwise2.align.globalxx(prot1.seqres, prot2.seqres)[0]
+    # alignment = pairwise2.align.globalxx(prot1.seqres, prot2.seqres)[0]
+    alignment = PairwiseAligner.align.globalxx(prot1.seqres, prot2.seqres)[0]
     prot1.residue_index = np.array([i for i, c in enumerate(alignment.seqA) if c != '-'])
     prot2.residue_index = np.array([i for i, c in enumerate(alignment.seqB) if c != '-'])
 
