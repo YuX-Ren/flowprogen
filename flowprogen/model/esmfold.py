@@ -145,9 +145,7 @@ class ESMFold(nn.Module):
         bosi, eosi = self.esm_dict.cls_idx, self.esm_dict.eos_idx
         bos = esmaa.new_full((batch_size, 1), bosi)
         eos = esmaa.new_full((batch_size, 1), self.esm_dict.padding_idx)
-        print('bos', bos.shape)
-        print('eos', eos.shape)
-        print('esmaa', esmaa.shape)
+
         esmaa = torch.cat([bos, esmaa, eos], dim=1)
         # Use the first padding index as eos during inference.
         esmaa[range(batch_size), (esmaa != 1).sum(1)] = eosi
