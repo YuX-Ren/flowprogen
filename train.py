@@ -48,9 +48,10 @@ def main():
             name=args.run_name,
             config=args,
         )
-
-    logger.info("Loading the chains dataframe")
-    pdb_chains = pd.read_csv(args.pdb_chains, index_col='name')
+    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    if rank == 0:
+        logger.info("Loading the chains dataframe")
+        pdb_chains = pd.read_csv(args.pdb_chains, index_col='name')
 
     if args.filter_chains:
         clusters = load_clusters(args.pdb_clusters)
@@ -105,7 +106,6 @@ def main():
 
     trainer = pl.Trainer(
         accelerator="gpu",
-        devices=8,
         strategy="deepspeed_stage_3",
         max_epochs=args.epochs,
         limit_train_batches=args.limit_batches or 1.0,
