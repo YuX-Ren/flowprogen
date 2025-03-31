@@ -103,11 +103,10 @@ def main():
         shuffle=not args.filter_chains,
     )
 
-
     trainer = pl.Trainer(
         accelerator="gpu",
         devices=8,
-        strategy="deepspeed_stage_2",
+        strategy="deepspeed_stage_3",
         max_epochs=args.epochs,
         limit_train_batches=args.limit_batches or 1.0,
         limit_val_batches=args.limit_batches or 1.0,
