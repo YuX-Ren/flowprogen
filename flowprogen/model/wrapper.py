@@ -243,7 +243,7 @@ class ModelWrapper(pl.LightningModule):
         self.model.load_state_dict(self.ema.state_dict()["params"])
         
     def on_before_zero_grad(self, *args, **kwargs):
-        if not self.args.no_ema:
+        if self.args.no_ema:
             self.ema.update(self.model)
 
     def on_load_checkpoint(self, checkpoint):
@@ -294,7 +294,7 @@ class ModelWrapper(pl.LightningModule):
 
     def log(self, key, data):
         if isinstance(data, torch.Tensor):
-            data = data.cpu().numpy()
+            data = data.detach().cpu().numpy()
         log = self._log
         if self.stage == 'train' or self.args.validate:
             log["iter_" + key].extend(data)
@@ -514,12 +514,12 @@ class AlphaFoldWrapper(ModelWrapper):
 
 
 class TransFlowWrapper(ModelWrapper):
-    def __init__(self, cfg, args, training=True):
+    def __init__(self, config, args, training=True):
         super().__init__()
         self.save_hyperparameters()
-        self.cfg = cfg
+        self.cfg = config
         self.args = args
-        self.esm_model = ESMFold(cfg.model,
+        self.esm_model = ESMFold(config.model,
                 extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
         if args.ckpt is None:
             print("Loading the model esmfold")
@@ -530,39 +530,39 @@ class TransFlowWrapper(ModelWrapper):
             print("Model esmfold has been loaded")
         
         self.encoder = self.esm_model
-        self.decoder = self.esm_model
+        self.decoder = None
         self.model = TransFlow(
             num_text_tokens = 21,  # Number of amino acids
             dim_latent = 128,
             channel_first_latent = False,  # Protein data is not channel-first
-            modality_default_shape = (256, 256),  # Maximum sequence length
+            modality_default_shape = (8, 8),  # Maximum sequence length
             modality_encoder = self.encoder,
-            modality_decoder = self.decoder,
-            # pre_post_transformer_enc_dec = (
-            #     nn.Linear(21, 256),  # Adapt latent dimension to transformer dimension
-            #     nn.Linear(256, 21),
-            # ),
+            modality_decoder = self.encoder,
             add_pos_emb = True,
             modality_num_dim = 2,
             fallback_to_default_shape_if_invalid = True,
             reconstruction_loss_weight = 1.0,
             transformer = dict(
-                dim = 256,
-                depth = 8,
-                dim_head = 64,
-                heads = 8,
-                use_gradient_checkpointing = True
+                dim = 128,
+                depth = 4,
+                dim_head = 32,
+                heads = 4,
+                attn_laser = True,
+                use_flex_attn = True,
+                use_gradient_checkpointing = True,
             )
         )
         
-        if not args.no_ema:
+        if training:
+            self.loss = AlphaFoldLoss(config.loss, esmfold=True)
             self.ema = ExponentialMovingAverage(
-                model=self.model, decay=cfg.ema.decay
+                model=self.model, decay=config.ema.decay
             )
+            self.cached_weights = None
         
         self._log = defaultdict(list)
 
-        self.harmonic_prior = HarmonicPrior(cfg.data.train.crop_size)
+        self.harmonic_prior = HarmonicPrior(config.data.train.crop_size)
         self.generator = torch.Generator().manual_seed(137)
         self.last_log_time = time.time()
         self.iter_step = 0
@@ -573,27 +573,52 @@ class TransFlowWrapper(ModelWrapper):
         batch_size = batch['aatype'].shape[0]
         self.harmonic_prior.to(device)
         self.stage = stage
+        
+        # Ensure all tensors in batch require gradients
+        for key, value in batch.items():
+            if isinstance(value, torch.Tensor) and value.dtype in [torch.float32, torch.float16, torch.float64]:
+                batch[key] = value.requires_grad_(True)
+        
         result = self.model.forward_modality(
             modalities=batch,
             times=None,
             modality_type=0,
             return_loss=True,
-            return_loss_breakdown=True
+            return_loss_breakdown=True,
         )
+        
         if isinstance(result, tuple) and len(result) == 2:
-            total_loss, (flow_loss, velocity_loss, recon_loss) = result
-            self.log('flow_loss', flow_loss)
-            self.log('velocity_loss', velocity_loss)
-            self.log('recon_loss', recon_loss)
-            return total_loss, (flow_loss, velocity_loss, recon_loss)
-        else:
-            total_loss = result
-            flow_loss = total_loss * 0.9
-            recon_loss = total_loss * 0.1
-            print("Warning: forward_seq_coord didn't return loss breakdown, using approximations.")
-            self.log('flow_loss', flow_loss)
-            self.log('recon_loss', recon_loss)
-            return total_loss, (flow_loss, _, recon_loss)
+            outputs, (flow_loss, velocity_loss) = result
+            loss, loss_breakdown = self.loss(outputs, batch, _return_breakdown=True)
+            
+            # Ensure losses are properly detached and have gradients
+            flow_loss = flow_loss.detach().requires_grad_(True)
+            velocity_loss = velocity_loss.detach().requires_grad_(True)
+            loss = loss.detach().requires_grad_(True)
+            
+            print('flow_loss', flow_loss)
+            print('loss', loss)
+
+            with torch.no_grad():
+                metrics = self._compute_validation_metrics(batch, outputs, superimposition_metrics=False)
+            
+            for k, v in loss_breakdown.items():
+                self.log(k, [v.item()])
+            self.log('flow_loss', [flow_loss.item()])
+            for k, v in metrics.items():
+                self.log(k, [v.item()])
+
+            self.log('dur', [time.time() - self.last_log_time])
+            self.last_log_time = time.time()
+            return loss
+        # else:
+        #     total_loss = result
+        #     flow_loss = total_loss * 0.9
+        #     recon_loss = total_loss * 0.1
+        #     print("Warning: forward_modality didn't return loss breakdown, using approximations.")
+        #     self.log('flow_loss', flow_loss)
+        #     self.log('recon_loss', recon_loss)
+        #     return total_loss, (flow_loss, _, recon_loss)
         
 
 class LLMFlowWrapper(ModelWrapper):
@@ -658,8 +683,7 @@ class LLMFlowWrapper(ModelWrapper):
         self.stage = stage
         if self.args.distillation:
             return self.disillation_training_step(batch)
-        import pdb; pdb.set_trace()
-        print('batch:', batch['aatype'].shape)
+
         result = self.model.forward_modality(
             modalities=batch,
             times=None,
@@ -712,7 +736,7 @@ class LLMFlowWrapper(ModelWrapper):
 
     def log(self, key, data):
         if isinstance(data, torch.Tensor):
-            data = data.cpu().numpy()
+            data = data.detach().cpu().numpy()
         log = self._log
         if self.stage == 'train' or self.args.validate:
             log["iter_" + key].extend(data)

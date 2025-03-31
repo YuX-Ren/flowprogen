@@ -947,9 +947,11 @@ class Attention(Module):
             out = flex_attention(q, k, v, **flex_attn_kwargs)
 
         else:
+            torch.cuda.synchronize()
             q = q * self.scale
             sim = einsum(q, k, 'b h i d, b h j d -> b h i j')
-
+            print('sim.shape', sim.shape)
+            torch.cuda.synchronize()
             sim = softclamp(sim, self.softcap_value)
 
             mask_value = max_neg_value(sim)
@@ -1010,10 +1012,13 @@ class Transformer(Module):
         use_gradient_checkpointing = False
     ):
         super().__init__()
+        self.dim = dim
+        self.depth = depth
+        self.use_gradient_checkpointing = use_gradient_checkpointing
+        
         self.use_flex_attn = use_flex_attn
         self.use_gradient_checkpointing = use_gradient_checkpointing
 
-        self.dim = dim
         self.dim_head = dim_head
 
         self.to_time_cond = nn.Sequential(
@@ -1058,26 +1063,22 @@ class Transformer(Module):
         self.layers = layers
         self.norm = RMSNorm(dim)
         
-    #     # Enable gradient checkpointing if requested
-    #     if use_gradient_checkpointing:
-    #         self._enable_gradient_checkpointing()
+    def _enable_gradient_checkpointing(self):
+        def create_custom_forward(module):
+            def custom_forward(*args, **kwargs):
+                return module(*args, **kwargs)
+            return custom_forward
             
-    # def _enable_gradient_checkpointing(self):
-    #     def create_custom_forward(module):
-    #         def custom_forward(*args, **kwargs):
-    #             return module(*args, **kwargs)
-    #         return custom_forward
-            
-    #     # Apply gradient checkpointing to each layer
-    #     for i, layer in enumerate(self.layers):
-    #         # Skip the first element (skip_proj) as it might be None
-    #         for j in range(1, len(layer)):
-    #             if hasattr(layer[j], 'forward'):
-    #                 layer[j]._original_forward = layer[j].forward
-    #                 layer[j].forward = torch.utils.checkpoint.checkpoint(
-    #                     create_custom_forward(layer[j]._original_forward),
-    #                     use_reentrant=False
-    #                 )
+        # Apply gradient checkpointing to each layer
+        for i, layer in enumerate(self.layers):
+            # Skip the first element (skip_proj) as it might be None
+            for j in range(1, len(layer)):
+                if hasattr(layer[j], 'forward'):
+                    layer[j]._original_forward = layer[j].forward
+                    layer[j].forward = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(layer[j]._original_forward),
+                        use_reentrant=False
+                    )
 
     @typecheck
     def forward(
@@ -1094,6 +1095,10 @@ class Transformer(Module):
         causal_mask = False,
         return_kv_cache = False
     ):
+        # Enable gradient checkpointing if requested
+        # if self.use_gradient_checkpointing:
+        #     self._enable_gradient_checkpointing()
+            
         batch, seq_len, device, input_is_cuda = x.shape[0], x.shape[-2], x.device, x.is_cuda
 
         is_decoding_with_cache = exists(cache)
@@ -1943,12 +1948,16 @@ class TransFlow(Module):
         times: Float['b'] | None = None,
         modality_type: int | None = None,
         encode_modality: bool = True,
-        velocity_consistency_ema_model: TransFlow | None = None,
+        velocity_consistency_ema_model: TransFlow | EMA | None = None,
         velocity_consistency_delta_time = 1e-5,
         return_loss = True,
         return_loss_breakdown = False
     ) -> Scalar | Float['b ...']:
+
         requires_velocity_consistency = exists(velocity_consistency_ema_model)
+        if isinstance(velocity_consistency_ema_model, EMA):
+            assert isinstance(velocity_consistency_ema_model.ema_model, TransFlow)
+            velocity_consistency_ema_model = velocity_consistency_ema_model.ema_model
 
         if isinstance(modalities, dict):
             # Assuming modalities is a dictionary, and values could be lists or tensors
@@ -2136,25 +2145,30 @@ class TransFlow(Module):
             if exists(mod.decoder):
                 with torch.no_grad():
                     mod.decoder.eval()
-                    recon = mod.decoder(recon)
+                    # recon = mod.decoder.get_decoder_outputs(recon)
+                    recon = mod.decoder.get_decoder_outputs(s_s_0, s_z_0, orig_modalities)
+                    '''
+                    dict_keys(['sm', 's_s', 's_z', 'distogram_logits', 'aatype', 'atom14_atom_exists', 'residx_atom14_to_atom37', 'residx_atom37_to_atom14', 'atom37_atom_exists', 'residue_index', 'lddt_logits', 'plddt', 'final_atom_positions', 'final_affine_tensor', 'name'])
+                    '''
 
-            recon_loss = F.mse_loss(
-                recon,
-                orig_modalities
-            )
+            # recon_loss = F.mse_loss(
+            #     recon['final_atom_positions'],
+            #     orig_modalities['all_atom_positions']
+            # )
 
         # total loss
 
-        total_loss = (
-            flow_loss +
-            velocity_loss * self.velocity_consistency_loss_weight +
-            recon_loss * self.reconstruction_loss_weight
-        )
+        # total_loss = (
+        #     flow_loss +
+        #     velocity_loss * self.velocity_consistency_loss_weight +
+        #     recon_loss * self.reconstruction_loss_weight
+        # )
 
-        if not return_loss_breakdown:
-            return total_loss
+        # if not return_loss_breakdown:
+        #     return total_loss
 
-        return total_loss, (flow_loss, velocity_loss, recon_loss)
+        # return total_loss, (flow_loss, velocity_loss, recon_loss)
+        return recon, (flow_loss, velocity_loss)
 
     @torch.no_grad()
     @eval_decorator
@@ -2209,7 +2223,7 @@ class TransFlow(Module):
 
         if exists(mod.decoder):
             mod.decoder.eval()
-            sampled_modality = mod.decoder(sampled_modality)
+            sampled_modality = mod.decoder.get_decoder_outputs(sampled_modality)
 
         return sampled_modality
 
