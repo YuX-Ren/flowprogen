@@ -24,7 +24,7 @@ def parse_train_args():
     parser.add_argument("--accumulate_grad", type=int, default=1)
     parser.add_argument("--grad_clip", type=float, default=1.)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--no_ema", action='store_true')
+    parser.add_argument("--no_ema", type=bool, default=True)
     
     ## Training data 
     parser.add_argument("--train_data_dir", type=str, default='./data')
@@ -39,7 +39,7 @@ def parse_train_args():
     ## Validation data
     parser.add_argument("--val_csv", type=str, default='splits/cameo2022.csv')
     parser.add_argument("--val_samples", type=int, default=5)
-    parser.add_argument("--val_msa_dir", type=str, default='./alignment')
+    parser.add_argument("--val_msa_dir", type=str, default='./alignment/cameo2022')
     parser.add_argument("--sample_val_confs", action='store_true')
     parser.add_argument("--num_val_confs", type=int, default=None)
     parser.add_argument("--normal_validate", action='store_true')
@@ -54,21 +54,22 @@ def parse_train_args():
     parser.add_argument("--distill_self_cond", action='store_true')
     
     ## Logging args
-    parser.add_argument("--print_freq", type=int, default=100)
+    parser.add_argument("--print_freq", type=int, default=10)
     parser.add_argument("--val_freq", type=int, default=1)
     parser.add_argument("--ckpt_freq", type=int, default=1)
-    parser.add_argument("--wandb", action="store_true")
+    parser.add_argument("--wandb", type=bool, default=True)
     parser.add_argument("--run_name", type=str, default="default")
     
     args = parser.parse_args()
     os.environ["MODEL_DIR"] = os.path.join("workdir", args.run_name)
-    os.environ["WANDB_LOGGING"] = str(int(args.wandb))
-    if args.wandb:
-        if subprocess.check_output(["git", "status", "-s"]):
-            exit()
-    args.commit = (
-        subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("ascii").strip()
-    )
+    # os.environ["WANDB_LOGGING"] = str(int(args.wandb))
+    # # if args.wandb:
+    #     if subprocess.check_output(["git", "status", "-s"]):
+    #         print("Warning: git status is not clean, skipping wandb logging")
+    #         exit()
+    # args.commit = (
+    #     subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("ascii").strip()
+    # )
 
     return args
     

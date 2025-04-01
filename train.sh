@@ -6,5 +6,3 @@ python train.py --lr 5e-4 --noise_prob 0.8 --accumulate_grad 8 --train_epoch_len
     --pdb_clusters ./pdb_clusters \
     --mode transflow \
     --run_name train_latent_only_transflow_esmfold
-
-    

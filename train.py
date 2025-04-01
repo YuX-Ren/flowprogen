@@ -39,19 +39,8 @@ def load_clusters(path):
     return pd.DataFrame(cluster_size).set_index('name')
     
 def main():
-    
-    if args.wandb:
-        wandb.init(
-            # entity=os.environ["WANDB_ENTITY"],
-            settings=wandb.Settings(start_method="fork"),
-            project="llmflow",
-            name=args.run_name,
-            config=args,
-        )
-    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
-    if rank == 0:
-        logger.info("Loading the chains dataframe")
-        pdb_chains = pd.read_csv(args.pdb_chains, index_col='name')
+
+    pdb_chains = pd.read_csv(args.pdb_chains, index_col='name')
 
     if args.filter_chains:
         clusters = load_clusters(args.pdb_clusters)
@@ -122,6 +111,14 @@ def main():
         check_val_every_n_epoch=args.val_freq,
         logger=False,
     )
+    if args.wandb and trainer.is_global_zero:
+        wandb.init(
+            # entity=os.environ["WANDB_ENTITY"],
+            # settings=wandb.Settings(start_method="fork"),
+            project="flowprogen",
+            name=args.run_name,
+            config=args,
+        )
     if args.mode == 'esmfold':
         model = ESMFoldWrapper(config, args)
         if args.ckpt is None:

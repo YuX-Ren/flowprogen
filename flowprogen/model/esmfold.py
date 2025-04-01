@@ -54,7 +54,7 @@ class ESMFold(nn.Module):
 
         self.cfg = cfg
         cfg = self.cfg
-        logger.info(f'model_cfg: {cfg.keys()}')
+        # logger.info(f'model_cfg: {cfg.keys()}')
         self.distogram_bins = 64
         self.esm, self.esm_dict = esm_registry.get(cfg.esm_type)()
 
