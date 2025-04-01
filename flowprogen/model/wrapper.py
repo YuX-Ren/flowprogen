@@ -243,7 +243,7 @@ class ModelWrapper(pl.LightningModule):
         self.model.load_state_dict(self.ema.state_dict()["params"])
         
     def on_before_zero_grad(self, *args, **kwargs):
-        if self.args.no_ema:
+        if not self.args.no_ema:
             self.ema.update(self.model)
 
     def on_load_checkpoint(self, checkpoint):
@@ -611,15 +611,6 @@ class TransFlowWrapper(ModelWrapper):
             self.log('dur', [time.time() - self.last_log_time])
             self.last_log_time = time.time()
             return loss
-        # else:
-        #     total_loss = result
-        #     flow_loss = total_loss * 0.9
-        #     recon_loss = total_loss * 0.1
-        #     print("Warning: forward_modality didn't return loss breakdown, using approximations.")
-        #     self.log('flow_loss', flow_loss)
-        #     self.log('recon_loss', recon_loss)
-        #     return total_loss, (flow_loss, _, recon_loss)
-        
 
 class LLMFlowWrapper(ModelWrapper):
     def __init__(self, cfg, args, training=True):
