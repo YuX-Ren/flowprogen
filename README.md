@@ -46,3 +46,8 @@ try:
 except ModuleNotFoundError:
     from torch import inf
 ```
+
+# Three key files
+pdb_cluster
+pdb_mmcif.csv
+pdb_mmcif_msa.csv

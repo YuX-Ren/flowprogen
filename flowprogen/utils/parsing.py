@@ -39,7 +39,7 @@ def parse_train_args():
     ## Validation data
     parser.add_argument("--val_csv", type=str, default='splits/cameo2022.csv')
     parser.add_argument("--val_samples", type=int, default=5)
-    parser.add_argument("--val_msa_dir", type=str, default='./alignment/cameo2022')
+    parser.add_argument("--val_msa_dir", type=str, default='./alignments/cameo2022')
     parser.add_argument("--sample_val_confs", action='store_true')
     parser.add_argument("--num_val_confs", type=int, default=None)
     parser.add_argument("--normal_validate", action='store_true')
@@ -54,10 +54,10 @@ def parse_train_args():
     parser.add_argument("--distill_self_cond", action='store_true')
     
     ## Logging args
-    parser.add_argument("--print_freq", type=int, default=10)
+    parser.add_argument("--print_freq", type=int, default=1)
     parser.add_argument("--val_freq", type=int, default=1)
     parser.add_argument("--ckpt_freq", type=int, default=1)
-    parser.add_argument("--wandb", type=bool, default=True)
+    parser.add_argument("--wandb", type=bool, default=False)
     parser.add_argument("--run_name", type=str, default="default")
     
     args = parser.parse_args()
