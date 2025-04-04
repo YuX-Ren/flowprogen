@@ -1,5 +1,5 @@
 from flowprogen.utils.parsing import parse_train_args
-args = parse_train_args()
+
 
 from flowprogen.utils.logging import get_logger
 logger = get_logger(__name__)
@@ -8,7 +8,9 @@ import pandas as pd
 
 from functools import partial
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint
+import lightning
+# from pytorch_lightning.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import ModelCheckpoint
 from openfold.utils.exponential_moving_average import ExponentialMovingAverage
 from flowprogen.model.wrapper import ESMFoldWrapper, AlphaFoldWrapper, LLMFlowWrapper, TransFlowWrapper
 from openfold.utils.import_weights import import_jax_weights_
@@ -38,7 +40,7 @@ def load_clusters(path):
                 cluster_size.append({'name': name, 'cluster_size': len(names)})
     return pd.DataFrame(cluster_size).set_index('name')
     
-def main():
+def main(args):
 
     pdb_chains = pd.read_csv(args.pdb_chains, index_col='name')
 
@@ -69,6 +71,7 @@ def main():
             first_as_template = args.first_as_template,
         )   
     else:
+        print('AlphaFoldCSVDataset', args.val_csv)
         valset = AlphaFoldCSVDataset(
             data_cfg,
             args.val_csv,
@@ -93,7 +96,7 @@ def main():
         shuffle=not args.filter_chains,
     )
 
-    trainer = pl.Trainer(
+    trainer = lightning.Trainer(
         accelerator="gpu",
         strategy="deepspeed_stage_3",
         max_epochs=args.epochs,
@@ -111,6 +114,7 @@ def main():
         check_val_every_n_epoch=args.val_freq,
         logger=False,
     )
+    print(args.wandb)
     if args.wandb and trainer.is_global_zero:
         wandb.init(
             # entity=os.environ["WANDB_ENTITY"],
@@ -161,4 +165,5 @@ def main():
         trainer.fit(model, train_loader, val_loader, ckpt_path=args.ckpt)
     
 if __name__ == "__main__":
-    main()
+    args = parse_train_args()
+    main(args)

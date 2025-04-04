@@ -1,13 +1,15 @@
 from typing import Sequence, Optional
-from openfold.np.protein import to_pdb
+# from openfold.np.protein import to_pdb
 from openfold.np.protein import from_pdb_string as _from_pdb_string
 from openfold.data import mmcif_parsing
 from openfold.np import residue_constants
 from flowprogen.utils.tensor_utils import tensor_tree_map
+from flowprogen.utils.loss import lddt
 import subprocess, tempfile, os, dataclasses
 import numpy as np
-# from Bio import pairwise2
-from Bio.Align import PairwiseAligner
+from Bio import pairwise2
+# from Bio.Align import PairwiseAligner
+import string
 
 @dataclasses.dataclass(repr=False)
 class Protein:
@@ -50,7 +52,8 @@ class Protein:
         ca_pos = residue_constants.atom_order["CA"]
         present = int(self.atom_mask[..., ca_pos].sum())
         total = self.atom_mask.shape[0]
-        return f"Protein(name={self.name} seqres={self.seqres} residues={present}/{total} b_mean={self.b_factors[...,ca_pos].mean()})"
+        # return f"Protein(name={self.name} seqres={self.seqres} residues={present}/{total} b_mean={self.b_factors[...,ca_pos].mean()})"
+        return f"Protein(aatype={self.aatype} name={self.name} seqres={self.seqres} atom_positions={self.atom_positions} atom_mask={self.atom_mask} residue_index={self.residue_index} b_factors={self.b_factors} chain_index={self.chain_index})"
 
     def present(self):
         ca_pos = residue_constants.atom_order["CA"]
@@ -121,7 +124,10 @@ def from_mmcif_string(mmcif_string, chain, name='', is_author_chain=False):
     atom_coords, atom_mask = mmcif_parsing.get_atom_coords(mmcif_object, chain)
     L = atom_coords.shape[0]
     seq = mmcif_object.chain_to_seqres[chain]
-    
+    chain_list = list(mmcif_object.chain_to_seqres.keys())
+    # print("chain_list:", chain_list)
+    # print("selected chain:", chain)
+    chain_idx = chain_list.index(chain) if chain in chain_list else 0
     unk_idx = residue_constants.restype_order_with_x["X"]
     aatype = np.array(
         [residue_constants.restype_order_with_x.get(aa, unk_idx) for aa in seq]
@@ -134,6 +140,7 @@ def from_mmcif_string(mmcif_string, chain, name='', is_author_chain=False):
         atom_mask=atom_mask,
         residue_index=np.arange(L) + 1,
         b_factors=np.zeros((L, 37)), # maybe replace 37 later
+        chain_index=np.full(L, chain_idx),
     )
     return prot
 
@@ -148,10 +155,9 @@ def global_metrics(ref_prot, pred_prot, lddt=False, symmetric=False):
         f.write(to_pdb(ref_prot))
     with open(pred_path, 'w') as f:
         f.write(to_pdb(pred_prot))
-    
     out = tmscore(ref_path, pred_path)
-    if lddt:
-        out['lddt'] = my_lddt_func(ref_path, pred_path)
+    # if lddt:  这里提示lddt未安装
+    #     out['lddt'] = my_lddt_func(ref_path, pred_path)
     
     os.unlink(ref_path)
     os.unlink(pred_path)
@@ -170,8 +176,8 @@ def align_residue_numbering(prot1, prot2, mask=False):
     prot1 = Protein(**prot1.__dict__)
     prot2 = Protein(**prot2.__dict__)
     
-    # alignment = pairwise2.align.globalxx(prot1.seqres, prot2.seqres)[0]
-    alignment = PairwiseAligner.align.globalxx(prot1.seqres, prot2.seqres)[0]
+    alignment = pairwise2.align.globalxx(prot1.seqres, prot2.seqres)[0]
+    # alignment = PairwiseAligner.align.globalxx(prot1.seqres, prot2.seqres)[0]
     prot1.residue_index = np.array([i for i, c in enumerate(alignment.seqA) if c != '-'])
     prot2.residue_index = np.array([i for i, c in enumerate(alignment.seqB) if c != '-'])
 
@@ -196,14 +202,12 @@ def align_residue_numbering(prot1, prot2, mask=False):
 
 def tmscore(ref_path, pred_path):
     
-        
-    out = subprocess.check_output(['TMscore', '-seq', pred_path, ref_path], 
-                    stderr=open('/dev/null', 'w'))
+    out = subprocess.check_output(['/usr/local/bin/TMscore', '-seq', pred_path, ref_path], 
+                    stderr=subprocess.PIPE)
     
     start = out.find(b'RMSD')
     end = out.find(b'rotation')
     out = out[start:end]
-    
     rmsd, _, tm, _, gdt_ts, gdt_ha, _, _ = out.split(b'\n')
     
     result = {
@@ -282,3 +286,124 @@ def my_lddt_func(ref_path, pred_path):
             result = float(line.split(b':')[-1].strip())
 
     return result
+
+def to_pdb(prot):
+    pdb_lines = []
+    atom_types = residue_constants.atom_types
+    aatype = prot.aatype
+    atom_positions = prot.atom_positions
+    atom_mask = prot.atom_mask
+    b_factors = prot.b_factors
+    chain_index = prot.chain_index
+    residue_index = prot.residue_index
+
+    pdb_lines.append("MODEL     1")
+    n = aatype.shape[0]
+    atom_index = 1
+    last_chain_index = chain_index[0] if chain_index is not None else 0
+    prev_chain_index = 0
+    chain_tags = string.ascii_uppercase
+    chain_tag = "A"  # Default chain tag
+    restypes = residue_constants.restypes + ["X"]
+    res_1to3 = lambda r: residue_constants.restype_1to3.get(restypes[r], "UNK")
+    # Add all atom sites.
+    for i in range(aatype.shape[0]):
+        # Close the previous chain if in a multichain PDB.
+        if chain_index is not None and last_chain_index != chain_index[i]:
+            pdb_lines.append(
+                _chain_end(
+                    atom_index, 
+                    res_1to3(aatype[i - 1]), 
+                    chain_tags[chain_index[i - 1]], 
+                    residue_index[i - 1]
+                )
+            )
+            last_chain_index = chain_index[i]
+            atom_index += 1 # Atom index increases at the TER symbol.
+
+        res_name_3 = res_1to3(aatype[i])
+        for atom_name, pos, mask, b_factor in zip(
+            atom_types, atom_positions[i], atom_mask[i], b_factors[i]
+        ):
+            if mask < 0.5:
+                continue
+
+            record_type = "ATOM"
+            name = atom_name if len(atom_name) == 4 else f" {atom_name}"
+            alt_loc = ""
+            insertion_code = ""
+            occupancy = 1.00
+            element = atom_name[0]  # Protein supports only C, N, O, S, this works.
+            charge = ""
+
+            if chain_index is not None:
+                chain_tag = chain_tags[chain_index[i]]
+
+            # PDB is a columnar format, every space matters here!
+            atom_line = (
+                f"{record_type:<6}{atom_index:>5} {name:<4}{alt_loc:>1}"
+                f"{res_name_3:>3} {chain_tag:>1}"
+                f"{residue_index[i]:>4}{insertion_code:>1}   "
+                f"{pos[0]:>8.3f}{pos[1]:>8.3f}{pos[2]:>8.3f}"
+                f"{occupancy:>6.2f}{b_factor:>6.2f}          "
+                f"{element:>2}{charge:>2}"
+            )
+            pdb_lines.append(atom_line)
+            atom_index += 1
+
+        should_terminate = (i == n - 1)
+        if chain_index is not None:
+            if i != n - 1 and chain_index[i + 1] != prev_chain_index:
+                should_terminate = True
+                prev_chain_index = chain_index[i + 1]
+
+        if should_terminate:
+            # Close the chain.
+            chain_end = "TER"
+            chain_termination_line = (
+                f"{chain_end:<6}{atom_index:>5}      "
+                f"{res_1to3(aatype[i]):>3} "
+                f"{chain_tag:>1}{residue_index[i]:>4}"
+            )
+            pdb_lines.append(chain_termination_line)
+            atom_index += 1
+
+            if i != n - 1:
+                # "prev" is a misnomer here. This happens at the beginning of
+                # each new chain.
+                pdb_lines.extend(get_pdb_headers(prot, prev_chain_index))
+    pdb_lines.append("ENDMDL")
+    pdb_lines.append("END")
+
+    # Pad all lines to 80 characters
+    pdb_lines = [line.ljust(80) for line in pdb_lines]
+    return "\n".join(pdb_lines) + '\n' 
+
+
+def _chain_end(atom_index, end_resname, chain_name, residue_index) -> str:
+    chain_end = 'TER'
+    return(
+        f'{chain_end:<6}{atom_index:>5}      {end_resname:>3} '
+        f'{chain_name:>1}{residue_index:>4}'
+    )
+
+def get_pdb_headers(prot: Protein, chain_id: int = 0) -> Sequence[str]:
+    pdb_headers = []
+
+    remark = prot.remark
+    if(remark is not None):
+        pdb_headers.append(f"REMARK {remark}")
+
+    parents = prot.parents
+    parents_chain_index = prot.parents_chain_index
+    if(parents_chain_index is not None):
+        parents = [
+            p for i, p in zip(parents_chain_index, parents) if i == chain_id
+        ]
+
+    if(parents is None or len(parents) == 0):
+        parents = ["N/A"]
+
+    pdb_headers.append(f"PARENT {' '.join(parents)}")
+
+    return pdb_headers

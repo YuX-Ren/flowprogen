@@ -10,7 +10,7 @@ from flowprogen.transflow import TransFlow
 from flowprogen.utils.loss import AlphaFoldLoss
 from flowprogen.utils.diffusion import HarmonicPrior, rmsdalign
 from flowprogen.utils import protein
-
+from flowprogen.utils.misc import categorical_lddt, batch_encode_sequences, collate_dense_tensors
 from openfold.utils.loss import lddt_ca
 from openfold.utils.superimposition import superimpose
 from openfold.utils.feats import pseudo_beta_fn
@@ -18,6 +18,8 @@ from openfold.data import data_transforms
 from openfold.utils.exponential_moving_average import ExponentialMovingAverage
 
 import pytorch_lightning as pl
+import lightning
+from lightning.pytorch.utilities.rank_zero import rank_zero_info
 import numpy as np
 from openfold.np import residue_constants
 from openfold.utils.validation_metrics import (
@@ -49,7 +51,7 @@ def get_log_mean(log):
     return out
 
 
-class ModelWrapper(pl.LightningModule):
+class ModelWrapper(lightning.LightningModule):
     def _add_noise(self, batch):
         
         device = batch['aatype'].device
@@ -116,11 +118,11 @@ class ModelWrapper(pl.LightningModule):
             metrics = self._compute_validation_metrics(orig_batch, student_output, superimposition_metrics=False)
     
         for k, v in loss_breakdown.items():
-            self.log(k, [v.item()])
+            self.log(k, v.item())
         for k, v in metrics.items():
-            self.log(k, [v.item()])
+            self.log(k, v.item())
 
-        self.log('dur', [time.time() - self.last_log_time])
+        self.log('dur', time.time() - self.last_log_time)
         self.last_log_time = time.time()
         return loss
         
@@ -143,9 +145,9 @@ class ModelWrapper(pl.LightningModule):
         
         if torch.rand(1, generator=self.generator).item() < self.args.noise_prob:
             self._add_noise(batch)
-            self.log('time', [batch['t'].mean().item()])
+            self.log('time', batch['t'].mean().item())
         else:
-            self.log('time', [1])
+            self.log('time', 1)
 
         if self.args.extra_input:
             if torch.rand(1, generator=self.generator).item() < self.args.extra_input_prob:
@@ -189,7 +191,6 @@ class ModelWrapper(pl.LightningModule):
         self.iter_step += 1
         self.stage = 'val'
         # At the start of validation, load the EMA weights
-            
         ref_prot = batch['ref_prot'][0]
         
         pred_prots = []
@@ -202,7 +203,7 @@ class ModelWrapper(pl.LightningModule):
 
         first_metrics = protein.global_metrics(ref_prot, prots[0])
         for key in first_metrics:
-            self.log('first_ref_'+key, [first_metrics[key]])
+            self.log('first_ref_'+key, first_metrics[key])
 
         ref_metrics = []
         for pred_prot in pred_prots:
@@ -217,13 +218,13 @@ class ModelWrapper(pl.LightningModule):
         
         ref_metrics = pd.DataFrame(ref_metrics)
         for key in ref_metrics:
-            self.log('mean_ref_'+key, [ref_metrics[key].mean()])
-            self.log('max_ref_'+key, [ref_metrics[key].max()]) 
-            self.log('min_ref_'+key, [ref_metrics[key].min()]) 
+            self.log('mean_ref_'+key, ref_metrics[key].mean())
+            self.log('max_ref_'+key, ref_metrics[key].max()) 
+            self.log('min_ref_'+key, ref_metrics[key].min()) 
         
         self_metrics = pd.DataFrame(self_metrics)
         for key in self_metrics:
-            self.log('self_'+key, [self_metrics[key].mean()])
+            self.log('self_'+key, self_metrics[key].mean())
         
         if self.args.validate:
             self.try_print_log()
@@ -275,50 +276,57 @@ class ModelWrapper(pl.LightningModule):
         if not self.args.no_ema:
             checkpoint["ema"] = self.ema.state_dict()
         
-    def try_print_log(self):
-        step = self.iter_step if self.args.validate else self.trainer.global_step 
-        if (step + 1) % self.args.print_freq == 0:
-            log = self._log
-            log = {key: log[key] for key in log if "iter_" in key}
+    # def try_print_log(self):
+    #     rank_zero_info('try_print_log')
+    #     step = self.iter_step if self.args.validate else self.trainer.global_step 
+    #     if (step + 1) % self.args.print_freq == 0:
+    #         log = self._log
+    #         # log = {key: log[key] for key in log if "iter_" in key}
+    #         log = {key: log[key] for key in log}
+    #         rank_zero_info(f'log1: {log}')
 
-            log = gather_log(log, self.trainer.world_size)
-            mean_log = get_log_mean(log)
-            mean_log.update({'epoch': self.trainer.current_epoch, 'step': self.trainer.global_step})
-            if self.trainer.is_global_zero:
-                logger.info(str(mean_log))
-                if self.args.wandb:
-                    wandb.log(mean_log)
-            for key in list(log.keys()):
-                if "iter_" in key:
-                    del self._log[key]
+    #         log = gather_log(log, self.trainer.world_size)
+    #         mean_log = get_log_mean(log)
+    #         # mean_log.update({'epoch': self.trainer.current_epoch, 'step': self.trainer.global_step})
+    #         rank_zero_info({'epoch': self.trainer.current_epoch, 'step': self.trainer.global_step})
+    #         if self.trainer.is_global_zero:
+    #             logger.info(str(mean_log))
+    #             if self.args.wandb:
+    #                 wandb.log(mean_log)
+    #         for key in list(log.keys()):
+    #             if "iter_" in key:
+    #                 del self._log[key]
 
-    def log(self, key, data):
-        if isinstance(data, torch.Tensor):
-            data = data.detach().cpu().numpy()
-        log = self._log
-        if self.stage == 'train' or self.args.validate:
-            log["iter_" + key].extend(data)
-        log[self.stage + "_" + key].extend(data)
+    # def log(self, key, data):
+    #     if isinstance(data, torch.Tensor):
+    #         data = data.detach().cpu().numpy()
+    #     log = self._log
+    #     if self.stage == 'train' or self.args.validate:
+    #         log["iter_" + key].extend(data)
+    #     log[self.stage + "_" + key].extend(data)
 
-    def on_train_epoch_end(self):
-        log = self._log
-        log = {key: log[key] for key in log if "train_" in key}
-        log = gather_log(log, self.trainer.world_size)
-        mean_log = get_log_mean(log)
-        mean_log.update({'epoch': self.trainer.current_epoch, 'step': self.trainer.global_step})
+    # def on_train_epoch_end(self):
+    #     rank_zero_info('on_train_epoch_end')
+    #     log = self._log
+    #     rank_zero_info(f'log2: {log}')
+    #     log = {key: log[key] for key in log if "train_" in key}
+    #     log = gather_log(log, self.trainer.world_size)
+    #     mean_log = get_log_mean(log)
+    #     # mean_log.update({'epoch': self.trainer.current_epoch, 'step': self.trainer.global_step})
+    #     rank_zero_info({'epoch': self.trainer.current_epoch, 'step': self.trainer.global_step})
             
-        if self.trainer.is_global_zero:
-            logger.info(str(mean_log))
-            if self.args.wandb:
-                wandb.log(mean_log)
+    #     if self.trainer.is_global_zero:
+    #         logger.info(str(mean_log))
+    #         if self.args.wandb:
+    #             wandb.log(mean_log)
 
-            path = os.path.join(
-                os.environ["MODEL_DIR"], f"train_{self.trainer.current_epoch}.csv"
-            )
-            pd.DataFrame(log).to_csv(path)
-        for key in list(log.keys()):
-            if "train_" in key:
-                del self._log[key]
+    #         path = os.path.join(
+    #             os.environ["MODEL_DIR"], f"train_{self.trainer.current_epoch}.csv"
+    #         )
+    #         pd.DataFrame(log).to_csv(path)
+    #     for key in list(log.keys()):
+    #         if "train_" in key:
+    #             del self._log[key]
 
     def on_validation_epoch_end(self):
         if not self.args.no_ema:
@@ -342,7 +350,7 @@ class ModelWrapper(pl.LightningModule):
 
 
     def on_before_optimizer_step(self, optimizer):
-        self.try_print_log()
+        # self.try_print_log()
         if self.args.check_grad:
             for name, p in self.model.named_parameters():
                 if p.grad is None:
@@ -461,8 +469,6 @@ class ModelWrapper(pl.LightningModule):
             }
         }
 
-    
-
 
 class ESMFoldWrapper(ModelWrapper):
     def __init__(self, cfg, args, training=True):
@@ -522,12 +528,12 @@ class TransFlowWrapper(ModelWrapper):
         self.esm_model = ESMFold(config.model,
                 extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
         if args.ckpt is None:
-            print("Loading the model esmfold")
+            rank_zero_info("Loading the model esmfold")
             path = "/share/project/xiaohongwang/Routine_ckpts/esm_pretrained_models/esm2_t33_650M_UR50D.pt"
-            model_data = torch.load(path)
+            model_data = torch.load(path, weights_only=False)
             model_state = model_data["model"]
             self.esm_model.load_state_dict(model_state, strict=False)
-            print("Model esmfold has been loaded")
+            rank_zero_info("Model esmfold has been loaded")
         
         self.encoder = self.esm_model
         self.decoder = None
@@ -596,21 +602,177 @@ class TransFlowWrapper(ModelWrapper):
             velocity_loss = velocity_loss.detach().requires_grad_(True)
             loss = loss.detach().requires_grad_(True)
             
-            print('flow_loss', flow_loss)
-            print('loss', loss)
+            # rank_zero_info(f'flow_loss: {flow_loss}')
+            # rank_zero_info(f'loss: {loss}')
 
             with torch.no_grad():
                 metrics = self._compute_validation_metrics(batch, outputs, superimposition_metrics=False)
             
-            for k, v in loss_breakdown.items():
-                self.log(k, [v.item()])
-            self.log('flow_loss', [flow_loss.item()])
-            for k, v in metrics.items():
-                self.log(k, [v.item()])
+            # for k, v in loss_breakdown.items():
+            #     self.log(k, [v.item()], prog_bar=True, on_step=True, on_epoch=True)
+            # self.log('flow_loss', [flow_loss.item()], prog_bar=True, on_step=True, on_epoch=True)
+            # for k, v in metrics.items():
+            #     self.log(k, [v.item()], prog_bar=True, on_step=True, on_epoch=True)
 
-            self.log('dur', [time.time() - self.last_log_time])
+            # self.log('dur', [time.time() - self.last_log_time], prog_bar=True, on_step=True, on_epoch=True)
+            for k, v in loss_breakdown.items():
+                self.log(k, v, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size)
+            self.log('flow_loss', flow_loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size)
+            for k, v in metrics.items():
+                self.log(k, v, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size)
+
+            self.log('dur', time.time() - self.last_log_time, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size)
             self.last_log_time = time.time()
             return loss
+
+    def validation_step(self, batch, batch_idx):
+        if not self.args.no_ema:
+            if(self.cached_weights is None):
+                self.load_ema_weights()
+            
+        if self.args.normal_validate:
+            self.training_step(batch, batch_idx, 'val')
+            if self.args.validate:
+                self.try_print_log()
+            return 
+            
+        self.iter_step += 1
+        self.stage = 'val'
+        # At the start of validation, load the EMA weights
+        ref_prot = batch['ref_prot'][0]
+        # print('ref_prot:', ref_prot)
+        
+        pred_prots = []
+        for _ in range(self.args.val_samples):
+            if self.args.distillation:
+                prots = self.inference(batch, no_diffusion=True, noisy_first=True, as_protein=True)
+            else:
+                prots = self.inference(batch, as_protein=True)
+            pred_prots.append(prots[-1])
+        # import pdb; pdb.set_trace()
+        first_metrics = protein.global_metrics(ref_prot, prots[0])
+        for key in first_metrics:
+            self.log('first_ref_'+key, first_metrics[key])
+
+        ref_metrics = []
+        for pred_prot in pred_prots:
+            ref_metrics.append(protein.global_metrics(ref_prot, pred_prot, lddt=True))
+
+        self_metrics = []
+        for i, pred_prot1 in enumerate(pred_prots):
+            pred_prot2 = pred_prots[(i+1) % len(pred_prots)]
+            self_metrics.append(protein.global_metrics(pred_prot1, pred_prot2, lddt=True))
+        
+        # self.log('name', [batch['name']])
+        
+        ref_metrics = pd.DataFrame(ref_metrics)
+        for key in ref_metrics:
+            self.log('mean_ref_'+key, ref_metrics[key].mean())
+            self.log('max_ref_'+key, ref_metrics[key].max()) 
+            self.log('min_ref_'+key, ref_metrics[key].min()) 
+        
+        self_metrics = pd.DataFrame(self_metrics)
+        for key in self_metrics:
+            self.log('self_'+key, self_metrics[key].mean())
+        
+        if self.args.validate:
+            self.try_print_log()
+
+    def inference(self, batch, as_protein=False, no_diffusion=False, self_cond=True, noisy_first=False, schedule=None):
+        N = batch['aatype'].shape[1]
+        device = batch['aatype'].device
+        prior = HarmonicPrior(N)
+        prior.to(device)
+        noisy = prior.sample()
+
+        sequences = batch["seqres"]
+        if isinstance(sequences, str):
+            sequences = [sequences]
+        aatype, mask, _residx, linker_mask, chain_index = batch_encode_sequences(
+            sequences, 512, "G" * 25
+        )
+        '''
+        chain_index:
+        tensor([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]])
+        '''
+        if not isinstance(_residx, torch.Tensor):
+            _residx = collate_dense_tensors(_residx)
+
+        aatype, mask, residx, linker_mask = map(
+            lambda x: x.to(self.device), (aatype, mask, _residx, linker_mask)
+        )
+
+        if noisy_first:
+            batch['noised_pseudo_beta_dists'] = torch.sum((noisy.unsqueeze(-2) - noisy.unsqueeze(-3)) ** 2, dim=-1)**0.5
+            batch['t'] = torch.ones(1, device=noisy.device)
+            
+        if no_diffusion:
+            print("$$$$$$$$$")
+            # output = self.model(batch)
+            s_s_0, s_z_0 = self.esm_model.get_encoder_outputs(batch)
+            # s_s_0, s_z_0 = self.esm_model.get_encoder_outputs(
+            #                 aatype=aatype,
+            #                 mask=mask,
+            #                 residx=residx,
+            #                 masking_pattern=None,
+            #                 num_recycles=4,
+            # )
+            output = self.esm_model.get_decoder_outputs(s_s_0, s_z_0, batch)
+            output["atom37_atom_exists"] = output[
+                    "atom37_atom_exists"
+                ] * linker_mask.unsqueeze(2)
+            # Expand plddt to match atom37_atom_exists dimensions and apply linker mask
+            plddt_expanded = output["plddt"].unsqueeze(2).expand(-1, -1, 37) * linker_mask.unsqueeze(2)
+            output["mean_plddt"] = (plddt_expanded * output["atom37_atom_exists"]).sum(dim=(1, 2)) / (output["atom37_atom_exists"].sum(dim=(1, 2)) + 1e-8)
+            output["chain_index"] = chain_index
+
+            if as_protein:
+                return protein.output_to_protein({**output, **batch})
+            else:
+                return [{**output, **batch}]
+
+        if schedule is None:
+            schedule = np.array([1.0, 0.75, 0.5, 0.25, 0.1, 0]) 
+
+        outputs = []
+        prev_outputs = None
+        for t, s in zip(schedule[:-1], schedule[1:]):
+            s_s_0, s_z_0 = self.esm_model.get_encoder_outputs(batch, prev_outputs=prev_outputs)
+            output = self.esm_model.get_decoder_outputs(s_s_0, s_z_0, batch)
+            pseudo_beta = pseudo_beta_fn(batch['aatype'], output['final_atom_positions'], None)
+            outputs.append({**output, **batch})
+            noisy = rmsdalign(pseudo_beta, noisy)
+            noisy = (s / t) * noisy + (1 - s / t) * pseudo_beta
+            batch['noised_pseudo_beta_dists'] = torch.sum((noisy.unsqueeze(-2) - noisy.unsqueeze(-3)) ** 2, dim=-1)**0.5
+            batch['t'] = torch.ones(1, device=noisy.device) * s
+            output["atom37_atom_exists"] = output[
+                    "atom37_atom_exists"
+                ] * linker_mask.unsqueeze(2)
+            # Expand plddt to match atom37_atom_exists dimensions and apply linker mask
+            plddt_expanded = output["plddt"].unsqueeze(2).expand(-1, -1, 37) * linker_mask.unsqueeze(2)
+            output["mean_plddt"] = (plddt_expanded * output["atom37_atom_exists"]).sum(dim=(1, 2)) / (output["atom37_atom_exists"].sum(dim=(1, 2)) + 1e-8)
+            output["chain_index"] = chain_index
+            if self_cond:
+                prev_outputs = output
+        # print("*********")
+        del batch['noised_pseudo_beta_dists'], batch['t']
+        if as_protein:
+            prots = []
+            for output in outputs:
+                prots.extend(protein.output_to_protein(output))
+            return prots
+        else:
+            return outputs
+
 
 class LLMFlowWrapper(ModelWrapper):
     def __init__(self, cfg, args, training=True):
@@ -622,12 +784,12 @@ class LLMFlowWrapper(ModelWrapper):
         self.esm_model = ESMFold(cfg.model,
                 extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
         if args.ckpt is None:
-            print("Loading the model esmfold")
+            rank_zero_info("Loading the model esmfold")
             path = "/share/project/xiaohongwang/Routine_ckpts/esm_pretrained_models/esm2_t33_650M_UR50D.pt"
             model_data = torch.load(path)
             model_state = model_data["model"]
             self.esm_model.load_state_dict(model_state, strict=False)
-            print("Model esmfold has been loaded")
+            rank_zero_info("Model esmfold has been loaded")
         
         self.evoformer_stack = self.esm_model.trunk
         self.structure_module = self.esm_model.trunk.structure_module
@@ -665,90 +827,3 @@ class LLMFlowWrapper(ModelWrapper):
         self.generator = torch.Generator().manual_seed(137)
         self.last_log_time = time.time()
         self.iter_step = 0
-
-    def training_step(self, batch, batch_idx, stage='train'):
-        self.iter_step += 1
-        device = batch["aatype"].device
-        batch_size = batch['aatype'].shape[0]
-        self.harmonic_prior.to(device)
-        self.stage = stage
-        if self.args.distillation:
-            return self.disillation_training_step(batch)
-
-        result = self.model.forward_modality(
-            modalities=batch,
-            times=None,
-            modality_type=0,
-            return_loss=True,
-            return_loss_breakdown=True
-        )
-
-        mean_log = get_log_mean(self._log)
-        if isinstance(result, tuple) and len(result) == 2:
-            total_loss, (flow_loss, velocity_loss, recon_loss) = result
-    
-            mean_log.update({
-                'flow_loss': flow_loss,
-                'velocity_loss': velocity_loss,
-                'recon_loss': recon_loss
-            })
-            return total_loss, (flow_loss, velocity_loss, recon_loss)
-        else:
-            total_loss = result
-            flow_loss = total_loss * 0.9
-            recon_loss = total_loss * 0.1
-            print("Warning: forward_modality didn't return loss breakdown, using approximations.")
-            mean_log.update({
-                'flow_loss': flow_loss,
-                'recon_loss': recon_loss
-            })
-            return total_loss, (flow_loss, _, recon_loss)
-        return total_loss
-    
-    def try_print_log(self):
-        step = self.iter_step if self.args.validate else self.trainer.global_step 
-        if (step + 1) % self.args.print_freq == 0:
-            log = self._log
-            log = {key: log[key] for key in log if "iter_" in key}
-            log = gather_log(log, self.trainer.world_size)
-            mean_log = get_log_mean(log)
-            mean_log.update({
-                'epoch3': self.trainer.current_epoch, 
-                'step': self.trainer.global_step,
-                'iter_step': self.iter_step
-            })
-            if self.trainer.is_global_zero:
-                logger.info(str(mean_log))
-                if self.args.wandb:
-                    wandb.log(mean_log)
-            for key in list(log.keys()):
-                if "iter_" in key:
-                    del self._log[key]
-
-    def log(self, key, data):
-        if isinstance(data, torch.Tensor):
-            data = data.detach().cpu().numpy()
-        log = self._log
-        if self.stage == 'train' or self.args.validate:
-            log["iter_" + key].extend(data)
-        log[self.stage + "_" + key].extend(data)
-
-    def on_train_epoch_end(self):
-        log = self._log
-        log = {key: log[key] for key in log if "train_" in key}
-        log = gather_log(log, self.trainer.world_size)
-        mean_log = get_log_mean(log)
-        mean_log.update({'epoch2': self.trainer.current_epoch, 'step': self.trainer.global_step})
-            
-        if self.trainer.is_global_zero:
-            logger.info(str(mean_log))
-            if self.args.wandb:
-                wandb.log(mean_log)
-
-            path = os.path.join(
-                os.environ["MODEL_DIR"], f"train_{self.trainer.current_epoch}.csv"
-            )
-            pd.DataFrame(log).to_csv(path)
-        for key in list(log.keys()):
-            if "train_" in key:
-                del self._log[key]
