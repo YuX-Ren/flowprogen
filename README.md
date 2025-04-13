@@ -19,6 +19,7 @@ train_latent_only_dillm_esmfold.py
 ```
 cd FlowProGen
 git clone git@github.com:aqlaboratory/openfold.git
+git checkout 103d0370ad9ce07579c20fa9c889a632f9b16618  (we need to use this commit version)
 python setup.py install
 ```
 
