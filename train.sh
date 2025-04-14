@@ -7,5 +7,4 @@ python train.py --lr 5e-4 --noise_prob 0.8 --accumulate_grad 8 --epochs 10 --tra
     --val_csv ./splits/cameo2022.csv \
     --val_msa_dir ./alignment_dir/cameo2022 \
     --mode transflow \
-    --run_name transflow_esmfold \
-    --wandb
+    --run_name transflow_esmfold

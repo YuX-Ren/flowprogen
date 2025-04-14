@@ -624,9 +624,6 @@ class TransFlowWrapper(ModelWrapper):
             velocity_loss = velocity_loss.detach().requires_grad_(True)
             loss = loss.detach().requires_grad_(True)
             
-            # rank_zero_info(f'flow_loss: {flow_loss}')
-            # rank_zero_info(f'loss: {loss}')
-
             with torch.no_grad():
                 metrics = self._compute_validation_metrics(batch, outputs, superimposition_metrics=False)
             
@@ -639,10 +636,10 @@ class TransFlowWrapper(ModelWrapper):
             self.log('dur', [float(time.time() - self.last_log_time)])
             self.last_log_time = time.time()
 
-            # added by hwxiao
+            # added by hwxiao, use default log()
+            # self.log('flow_loss', flow_loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size)
             # for k, v in loss_breakdown.items():
             #     self.log(k, v, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size)
-            # self.log('flow_loss', flow_loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size)
             # for k, v in metrics.items():
             #     self.log(k, v, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size)
 
@@ -692,6 +689,7 @@ class TransFlowWrapper(ModelWrapper):
         
         ref_metrics = pd.DataFrame(ref_metrics)
         for key in ref_metrics:
+            print('****',ref_metrics[key].mean())
             self.log('mean_ref_'+key, ref_metrics[key].mean())
             self.log('max_ref_'+key, ref_metrics[key].max()) 
             self.log('min_ref_'+key, ref_metrics[key].min()) 
