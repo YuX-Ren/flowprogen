@@ -5,7 +5,7 @@ import os, subprocess
 def parse_train_args():
     parser = ArgumentParser()
 
-    parser.add_argument("--mode", choices=['esmfold', 'alphafold', 'llmflow', 'transflow'], default='alphafold')
+    parser.add_argument("--mode", choices=['esmfold', 'alphafold', 'llmflow', 'transflow'], default='transflow')
     
     ## Trainer settings
     parser.add_argument("--ckpt", type=str, default=None)
@@ -39,7 +39,7 @@ def parse_train_args():
     ## Validation data
     parser.add_argument("--val_csv", type=str, default='splits/cameo2022.csv')
     parser.add_argument("--val_samples", type=int, default=5)
-    parser.add_argument("--val_msa_dir", type=str, default='./alignments/cameo2022')
+    parser.add_argument("--val_msa_dir", type=str, default='./alignment_dir/cameo2022')
     parser.add_argument("--sample_val_confs", action='store_true')
     parser.add_argument("--num_val_confs", type=int, default=None)
     parser.add_argument("--normal_validate", action='store_true')
@@ -62,6 +62,7 @@ def parse_train_args():
     
     args = parser.parse_args()
     os.environ["MODEL_DIR"] = os.path.join("workdir", args.run_name)
+    print(os.environ["MODEL_DIR"])
     # os.environ["WANDB_LOGGING"] = str(int(args.wandb))
     # # if args.wandb:
     #     if subprocess.check_output(["git", "status", "-s"]):

@@ -52,14 +52,16 @@ from tqdm import tqdm
 from loguru import logger
 
 # 添加 transformers 库导入
-from transformers import LlamaForCausalLM, LlamaConfig, LlamaModel
+from transformers import AutoModelForCausalLM, AutoConfig
 
 pad_sequence = partial(pad_sequence, batch_first = True)
 
 # tensor typing
 
+from typing import Annotated, Union
 import jaxtyping
 from jaxtyping import jaxtyped
+from jaxtyping import Int, Float 
 from beartype import beartype
 from beartype.door import is_bearable
 
@@ -90,6 +92,14 @@ except ImportError:
 Scalar = Float['']
 
 ModalitySample = list[Int[''] | Int['_'] | Float['...'] | tuple[int, Float['...']]]
+# ModalitySample = list[
+#     Union[
+#         Int[''],
+#         Int['_'],
+#         Float['...'],
+#         tuple[int, Float['...']]
+#     ]
+# ]
 
 ModalityTokenTransform = str | Callable | None
 
@@ -1237,7 +1247,7 @@ class LlamaTransformer(Module):
         
         if config is None:
             if model_name_or_path is not None:
-                self.model = LlamaForCausalLM.from_pretrained(model_name_or_path,
+                self.model = AutoModelForCausalLM.from_pretrained(model_name_or_path,
                                                             torch_dtype=torch.float16,  # 或 torch.bfloat16
                                                             # device_map={"": 0},  # 自动分配到可用设备
                                                             use_cache=not use_gradient_checkpointing
@@ -1246,13 +1256,13 @@ class LlamaTransformer(Module):
                     self.model.gradient_checkpointing_enable()
             else:
                 # 创建默认配置
-                llama_config = LlamaConfig(
+                llama_config = AutoConfig(
                     hidden_size=dim,
                     # 其他必要参数
                 )
-                self.model = LlamaForCausalLM(llama_config)
+                self.model = AutoModelForCausalLM(llama_config)
         else:
-            self.model = LlamaForCausalLM(config)
+            self.model = AutoModelForCausalLM(config)
             
         self.dim = dim
         self.dim_head = dim_head  # 保存 dim_head 属性

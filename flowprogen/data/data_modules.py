@@ -26,7 +26,6 @@ import pandas as pd
 import ml_collections as mlc
 import numpy as np
 import pytorch_lightning as pl
-import lightning
 import torch
 
 from openfold.data import mmcif_parsing
@@ -442,7 +441,7 @@ class OpenFoldDataLoader(torch.utils.data.DataLoader):
         return _batch_prop_gen(it)
 
 
-class OpenFoldDataModule(lightning.LightningDataModule):
+class OpenFoldDataModule(pl.LightningDataModule):
     def __init__(self,
         config: mlc.ConfigDict,
         template_mmcif_dir: str,
@@ -672,7 +671,7 @@ class DummyDataset(torch.utils.data.Dataset):
         return 1000
 
 
-class DummyDataLoader(lightning.LightningDataModule):
+class DummyDataLoader(pl.LightningDataModule):
     def __init__(self, batch_path):
         super().__init__()
         self.dataset = DummyDataset(batch_path)

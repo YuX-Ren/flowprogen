@@ -463,10 +463,10 @@ class DataPipeline:
 
                 if(ext == ".a3m"):
                     with open(path, "r") as fp:
-                        msa = parsers.parse_a3m(fp.read())
+                        msa, deletion_matrix = parsers.parse_a3m(fp.read())
                     data = {
-                        "msa": msa.sequences,
-                        "deletion_matrix": msa.deletion_matrix
+                        "msa": msa,
+                        "deletion_matrix": deletion_matrix
                     }
                 elif(ext == ".sto"):
                     with open(path, "r") as fp:

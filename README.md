@@ -21,6 +21,7 @@ cd FlowProGen
 git clone git@github.com:aqlaboratory/openfold.git
 git checkout 103d0370ad9ce07579c20fa9c889a632f9b16618  (we need to use this commit version)
 python setup.py install
+or directly (pip install 'openfold @ git+ssh://git@github.com/aqlaboratory/openfold.git@103d037')
 ```
 
 ```
@@ -40,7 +41,7 @@ extra_cuda_flags = [
 ```
 from flash_attn.flash_attn_interface import flash_attn_varlen_kvpacked_func
 ```
-2. ModuleNotFoundError: No module named 'torch._six'
+2. Will encounter the error "ModuleNotFoundError: No module named 'torch._six'" in lower version deepspeed, like 0.7.0 or 0.5.10
 ```
 try:
     from torch._six import inf
@@ -52,3 +53,11 @@ except ModuleNotFoundError:
 pdb_cluster
 pdb_mmcif.csv
 pdb_mmcif_msa.csv
+
+# install TMscore cli
+```
+wget https://zhanggroup.org/TM-score/TMscore.cpp
+g++ -O3 -static -o TMscore TMscore.cpp
+mv TMscore /usr/local/bin/
+chmod +x /usr/local/bin/TMscore
+```

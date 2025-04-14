@@ -57,7 +57,73 @@ class HarmonicPrior:
     def sample(self, batch_dims=()):
         return self.P @ (torch.sqrt(self.D_inv)[:,None] * torch.randn(*batch_dims, self.N, 3, device=self.P.device))
     
+class GaussianPrior:
+    def __init__(self, N=256, sigma=1.0):
+        """
+        Initialize a Gaussian prior distribution.
+        
+        Args:
+            N (int): Size of the sequence dimension
+            sigma (float): Standard deviation of the Gaussian distribution
+        """
+        self.N = N
+        self.sigma = sigma
+        self.mean = torch.zeros(1) 
+        self.std = torch.ones(1) 
+        
+    def to(self, device):
+        """
+        Move the prior parameters to the specified device.
+        
+        Args:
+            device: PyTorch device to move parameters to
+        """
+        self.mean = self.mean.to(device)
+        self.std = self.std.to(device)
+        
+    def sample(self, batch_dims=()):
+        """
+        Sample from the Gaussian prior distribution.
+        
+        Args:
+            batch_dims (tuple): Batch dimensions for the samples
+            
+        Returns:
+            torch.Tensor: Samples from the Gaussian distribution with shape (*batch_dims, N, 3)
+        """
+        return self.sigma * torch.randn(*batch_dims, self.N, 3, device=self.mean.device if self.mean is not None else 'cpu')
     
+    def set_mean_std(self, mean, std):
+        """
+        Set the mean and standard deviation for the Gaussian prior.
+        
+        Args:
+            mean (torch.Tensor): Mean tensor with shape (*batch_dims, N, 3)
+            std (torch.Tensor): Standard deviation tensor with shape (*batch_dims, N, 3)
+        """
+        self.mean = mean
+        self.std = std
+        
+    def sample_with_params(self, batch_dims=(), mean=None, std=None):
+        """
+        Sample from a Gaussian distribution with specified mean and standard deviation.
+        
+        Args:
+            batch_dims (tuple): Batch dimensions for the samples
+            mean (torch.Tensor, optional): Mean tensor. If None, uses self.mean
+            std (torch.Tensor, optional): Standard deviation tensor. If None, uses self.std
+            
+        Returns:
+            torch.Tensor: Samples from the Gaussian distribution
+        """
+        if mean is None:
+            mean = self.mean if self.mean is not None else 0.0
+        if std is None:
+            std = self.std if self.std is not None else self.sigma
+            
+        device = mean.device if isinstance(mean, torch.Tensor) else 'cpu'
+        return mean + std * torch.randn(*batch_dims, self.N, 3, device=device)
+
 '''
 def transition_matrix(N_bins=1000, X_max=5):
     bins = torch.linspace(0, X_max, N_bins+1, dtype=torch.float64)

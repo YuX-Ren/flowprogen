@@ -53,7 +53,7 @@ class Protein:
         present = int(self.atom_mask[..., ca_pos].sum())
         total = self.atom_mask.shape[0]
         # return f"Protein(name={self.name} seqres={self.seqres} residues={present}/{total} b_mean={self.b_factors[...,ca_pos].mean()})"
-        return f"Protein(aatype={self.aatype} name={self.name} seqres={self.seqres} atom_positions={self.atom_positions} atom_mask={self.atom_mask} residue_index={self.residue_index} b_factors={self.b_factors} chain_index={self.chain_index})"
+        return f"Protein(aatype={self.aatype} name={self.name} seqres={self.seqres} atom_positions={self.atom_positions} atom_mask={self.atom_mask} residue_index={self.residue_index} b_factors={self.b_factors}"
 
     def present(self):
         ca_pos = residue_constants.atom_order["CA"]
@@ -124,10 +124,10 @@ def from_mmcif_string(mmcif_string, chain, name='', is_author_chain=False):
     atom_coords, atom_mask = mmcif_parsing.get_atom_coords(mmcif_object, chain)
     L = atom_coords.shape[0]
     seq = mmcif_object.chain_to_seqres[chain]
-    chain_list = list(mmcif_object.chain_to_seqres.keys())
+    # chain_list = list(mmcif_object.chain_to_seqres.keys())
     # print("chain_list:", chain_list)
     # print("selected chain:", chain)
-    chain_idx = chain_list.index(chain) if chain in chain_list else 0
+    # chain_idx = chain_list.index(chain) if chain in chain_list else 0
     unk_idx = residue_constants.restype_order_with_x["X"]
     aatype = np.array(
         [residue_constants.restype_order_with_x.get(aa, unk_idx) for aa in seq]
@@ -140,7 +140,7 @@ def from_mmcif_string(mmcif_string, chain, name='', is_author_chain=False):
         atom_mask=atom_mask,
         residue_index=np.arange(L) + 1,
         b_factors=np.zeros((L, 37)), # maybe replace 37 later
-        chain_index=np.full(L, chain_idx),
+        # chain_index=np.full(L, chain_idx),
     )
     return prot
 
@@ -149,8 +149,14 @@ def global_metrics(ref_prot, pred_prot, lddt=False, symmetric=False):
     if lddt or symmetric:
         ref_prot, pred_prot = align_residue_numbering(ref_prot, pred_prot, mask=symmetric)
 
+    # Save PDB files to current directory
+    # ref_path = f"./ref_{ref_prot.name}.pdb"
+    # pred_path = f"./pred_{pred_prot.name}.pdb"
+    # print(f"Reference PDB file: {ref_path}")
+    # print(f"Prediction PDB file: {pred_path}")
     f, ref_path = tempfile.mkstemp(); os.close(f)
     f, pred_path = tempfile.mkstemp(); os.close(f)
+    
     with open(ref_path, 'w') as f:
         f.write(to_pdb(ref_prot))
     with open(pred_path, 'w') as f:
@@ -159,6 +165,7 @@ def global_metrics(ref_prot, pred_prot, lddt=False, symmetric=False):
     # if lddt:  这里提示lddt未安装
     #     out['lddt'] = my_lddt_func(ref_path, pred_path)
     
+    # Don't delete the files, they are saved in the current directory
     os.unlink(ref_path)
     os.unlink(pred_path)
     return out

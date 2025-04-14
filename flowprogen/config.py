@@ -491,7 +491,7 @@ config = mlc.ConfigDict(
                 "enabled": True,
             },
             ## ESMFold
-            "esm_type": "esm2_650M",
+            "esm_type": "esm2_3B",
             "fp16_esm": True,
             "use_esm_attn_map": False,
             "esm_ablate_pairwise": False,

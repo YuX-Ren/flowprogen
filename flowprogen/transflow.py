@@ -2046,9 +2046,15 @@ class TransFlow(Module):
                 '''
         # shapes and device
         # tokens = modalities
-        tokens = modalities['s_z'] #torch.Size([1, 256, 256, 128])
-        
+        # tokens = modalities['s_z']  # shape [1, 256, 256, 128]
+        s_s = modalities['s_s']  # shape [1, 256, 1024]
+        s_z = modalities['s_z']  # shape [1, 256, 256, 128]
+        s_s_i = s_s.unsqueeze(2).expand(-1, -1, 256, -1)  # [1, 256, 256, 1024]
+        s_s_j = s_s.unsqueeze(1).expand(-1, 256, -1, -1)  # [1, 256, 256, 1024]
+        s_z_enriched = torch.cat([s_z, s_s_i, s_s_j], dim=-1) # [1, 256, 256, 2176]
 
+        tokens = s_z_enriched
+        
         batch, device = tokens.shape[0], tokens.device
         seq_length = modalities['aatype'].shape[1]
 

@@ -169,4 +169,4 @@ checkpoints*
 transfusion-pytorch
 results*
 workdir
-alignments
+alignment_dir

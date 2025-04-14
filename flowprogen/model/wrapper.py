@@ -18,7 +18,6 @@ from openfold.data import data_transforms
 from openfold.utils.exponential_moving_average import ExponentialMovingAverage
 
 import pytorch_lightning as pl
-import lightning
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
 import numpy as np
 from openfold.np import residue_constants
@@ -51,7 +50,7 @@ def get_log_mean(log):
     return out
 
 
-class ModelWrapper(lightning.LightningModule):
+class ModelWrapper(pl.LightningModule):
     def _add_noise(self, batch):
         
         device = batch['aatype'].device
@@ -530,7 +529,7 @@ class TransFlowWrapper(ModelWrapper):
                 extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
         if args.ckpt is None:
             rank_zero_info("Loading the model esmfold")
-            path = "/share/project/xiaohongwang/Routine_ckpts/esm_pretrained_models/esm2_t33_650M_UR50D.pt"
+            path = "/share/project/xiaohongwang/Routine_ckpts/esm_pretrained_models/esmfold_3B_v1.pt"
             model_data = torch.load(path, weights_only=False)
             model_state = model_data["model"]
             self.esm_model.load_state_dict(model_state, strict=False)
@@ -760,7 +759,7 @@ class TransFlowWrapper(ModelWrapper):
             # Expand plddt to match atom37_atom_exists dimensions and apply linker mask
             plddt_expanded = output["plddt"].unsqueeze(2).expand(-1, -1, 37) * linker_mask.unsqueeze(2)
             output["mean_plddt"] = (plddt_expanded * output["atom37_atom_exists"]).sum(dim=(1, 2)) / (output["atom37_atom_exists"].sum(dim=(1, 2)) + 1e-8)
-            output["chain_index"] = chain_index
+            # output["chain_index"] = chain_index
 
             if as_protein:
                 return protein.output_to_protein({**output, **batch})
@@ -787,7 +786,7 @@ class TransFlowWrapper(ModelWrapper):
             # Expand plddt to match atom37_atom_exists dimensions and apply linker mask
             plddt_expanded = output["plddt"].unsqueeze(2).expand(-1, -1, 37) * linker_mask.unsqueeze(2)
             output["mean_plddt"] = (plddt_expanded * output["atom37_atom_exists"]).sum(dim=(1, 2)) / (output["atom37_atom_exists"].sum(dim=(1, 2)) + 1e-8)
-            output["chain_index"] = chain_index
+            # output["chain_index"] = chain_index
             if self_cond:
                 prev_outputs = output
         # print("*********")
@@ -820,7 +819,6 @@ class TransFlowWrapper(ModelWrapper):
         if isinstance(data, (list, np.ndarray)):
             data = [float(x) if isinstance(x, np.number) else x for x in data]
             
-        import pdb; pdb.set_trace()
         if self.stage == 'train' or self.args.validate:
             if "iter_" + key not in log:
                 log["iter_" + key] = []
