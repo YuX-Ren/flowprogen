@@ -169,7 +169,7 @@ if __name__ == "__main__":
     parser.add_argument("--accumulate_grad", type=int, default=1)
     parser.add_argument("--grad_clip", type=float, default=1.)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--no_ema", type=bool, default=True)
+    parser.add_argument("--no_ema", action='store_true')
     
     ## Training data 
     parser.add_argument("--train_data_dir", type=str, default='./data')
