@@ -48,7 +48,7 @@ from hyper_connections import HyperConnections
 
 from tqdm import tqdm
 from loguru import logger
-
+from openfold.utils.exponential_moving_average import ExponentialMovingAverage
 pad_sequence = partial(pad_sequence, batch_first = True)
 
 # tensor typing
@@ -1948,7 +1948,7 @@ class TransFlow(Module):
         times: Float['b'] | None = None,
         modality_type: int | None = None,
         encode_modality: bool = True,
-        velocity_consistency_ema_model: TransFlow | EMA | None = None,
+        velocity_consistency_ema_model: TransFlow | EMA | ExponentialMovingAverage | None = None,
         velocity_consistency_delta_time = 1e-5,
         return_loss = True,
         return_loss_breakdown = False
@@ -2247,7 +2247,7 @@ class TransFlow(Module):
         cache: Tensor | None = None,
         decode_length: int | None = None,
         decoding_text_or_modality: Literal['text', 'modality'] | None = None,
-        velocity_consistency_ema_model: TransFlow | EMA | None = None,
+        velocity_consistency_ema_model: TransFlow | EMA | ExponentialMovingAverage | None = None,
         velocity_consistency_delta_time = 1e-3,
         return_only_pred_flows = False,
         return_loss = True,
