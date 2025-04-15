@@ -10,10 +10,10 @@ import pandas as pd
 from functools import partial
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import WandbLogger
 # from lightning.pytorch.callbacks import ModelCheckpoint
 from openfold.utils.exponential_moving_average import ExponentialMovingAverage
-from flowprogen.model.wrapper import ESMFoldWrapper, AlphaFoldWrapper, LLMFlowWrapper, TransFlowWrapper
-from openfold.utils.import_weights import import_jax_weights_
+from flowprogen.model.wrapper import TransFlowWrapper, LLMFlowWrapper
 
 torch.set_float32_matmul_precision("high")
 from flowprogen.config import model_config
@@ -119,39 +119,16 @@ def main(args):
     if args.wandb and trainer.is_global_zero:
         wandb.init(
             # entity=os.environ["WANDB_ENTITY"],
-            # settings=wandb.Settings(start_method="fork"),
+            settings=wandb.Settings(start_method="fork"),
             project="flowprogen",
             name=args.run_name,
             config=args,
         )
-    if args.mode == 'esmfold':
-        model = ESMFoldWrapper(config, args)
-        if args.ckpt is None:
-            logger.info("Loading the model")
-            path = "/share/project/xiaohongwang/Routine_ckpts/esm_pretrained_models/esmfold_3B_v1.pt"
-            model_data = torch.load(path)
-            model_state = model_data["model"]
-            model.model.load_state_dict(model_state, strict=False)
-            logger.info("Model has been loaded")
-            
-            if not args.no_ema:
-                model.ema = ExponentialMovingAverage(
-                    model=model.model, decay=config.ema.decay
-                ) # need to initialize EMA this way at the beginning
-    elif args.mode == 'alphafold':
-        model = AlphaFoldWrapper(config, args)
-        if args.ckpt is None:
-            logger.info("Loading the model")
-            import_jax_weights_(model.model, '/share/project/database/database/params_v3/params_model_1.npz', version='model_3')
-            if not args.no_ema:
-                model.ema = ExponentialMovingAverage(
-                    model=model.model, decay=config.ema.decay
-                ) # need to initialize EMA this way at the beginning
+    if args.mode == 'transflow':
+        model = TransFlowWrapper(config, args)
     elif args.mode == 'llmflow':
         model = LLMFlowWrapper(config, args)
-    elif args.mode == 'transflow':
-        model = TransFlowWrapper(config, args)
-        
+
     if args.restore_weights_only:
         model.load_state_dict(torch.load(args.ckpt, map_location='cpu')['state_dict'], strict=False)
         args.ckpt = None
@@ -168,7 +145,7 @@ def main(args):
 if __name__ == "__main__":
     parser = ArgumentParser()
 
-    parser.add_argument("--mode", choices=['esmfold', 'alphafold', 'llmflow', 'transflow'], default='transflow')
+    parser.add_argument("--mode", choices=['transflow', 'llmflow'], default='transflow')
     
     ## Trainer settings
     parser.add_argument("--ckpt", type=str, default=None)
