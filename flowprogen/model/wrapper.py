@@ -72,7 +72,7 @@ class ModelWrapper(pl.LightningModule):
         batch['noised_pseudo_beta_dists'] = pseudo_beta_dists
         batch['t'] = t
 
-    def disillation_training_step(self, batch):
+    def distillation_training_step(self, batch):
         device = batch['aatype'].device
         batch_dims = batch['seq_length'].shape
 
@@ -181,13 +181,13 @@ class ModelWrapper(pl.LightningModule):
                 metrics = self._compute_validation_metrics(batch, outputs, superimposition_metrics=False)
 
             # added by hwxiao, use default log()
-            self.log(f'{self.stage}/flow_loss', flow_loss, prog_bar=True, on_step=True, on_epoch=False, batch_size=batch_size, sync_dist=True)
+            self.log(f'{self.stage}/flow_loss', flow_loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
             for k, v in loss_breakdown.items():
-                self.log(f'{self.stage}/'+k, v.item(), prog_bar=True, on_step=True, on_epoch=False, batch_size=batch_size, sync_dist=True)
+                self.log(f'{self.stage}/'+k, v.item(), prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
             for k, v in metrics.items():
-                self.log(f'{self.stage}/'+k, v.item(), prog_bar=True, on_step=True, on_epoch=False, batch_size=batch_size, sync_dist=True)
+                self.log(f'{self.stage}/'+k, v.item(), prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
         
-            self.log(f'{self.stage}/dur', time.time() - self.last_log_time, prog_bar=True, on_step=True, on_epoch=False, batch_size=batch_size, sync_dist=True)
+            self.log(f'{self.stage}/dur', time.time() - self.last_log_time, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
             self.last_log_time = time.time()
             return loss
 
@@ -548,12 +548,12 @@ class TransFlowWrapper(ModelWrapper):
         self.esm_model = ESMFold(config.model,
                 extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
         if args.ckpt is None:
-            rank_zero_info("Loading the model esmfold")
+            rank_zero_info("Loading the model esmfold in TransFlowWrapper")
             path = "/share/project/xiaohongwang/Routine_ckpts/esm_pretrained_models/esmfold_3B_v1.pt"
             model_data = torch.load(path, weights_only=False)
             model_state = model_data["model"]
             self.esm_model.load_state_dict(model_state, strict=False)
-            rank_zero_info("Model esmfold has been loaded")
+            rank_zero_info("Model esmfold has been loaded in TransFlowWrapper")
         
         self.encoder = self.esm_model
         self.decoder = None
@@ -565,7 +565,7 @@ class TransFlowWrapper(ModelWrapper):
             modality_encoder = self.encoder,
             modality_decoder = self.encoder,
             add_pos_emb = True,
-            modality_num_dim = 2,
+            modality_num_dim = 2, # corresponds to modality_default_shape
             fallback_to_default_shape_if_invalid = True,
             reconstruction_loss_weight = 1.0,
             transformer = dict(
@@ -580,6 +580,8 @@ class TransFlowWrapper(ModelWrapper):
         )
         
         if training:
+            if args and 'distillation' in args.__dict__ and args.distillation:
+                self.teacher = ESMFold(config.model, extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
             self.loss = AlphaFoldLoss(config.loss, esmfold=True)
             self.ema = ExponentialMovingAverage(
                 model=self.model, decay=config.ema.decay
@@ -594,67 +596,38 @@ class TransFlowWrapper(ModelWrapper):
         self.last_log_time = time.time()
         self.iter_step = 0
 
-    # def log(self, key, data):
-    #     if isinstance(data, torch.Tensor):
-    #         data = data.cpu().numpy()
-    #     log = self._log
-    #     # Convert scalar values to lists before extending
-    #     if isinstance(data, (float, int, np.number)):
-    #         # Convert numpy number types to Python float to avoid np.float64 in saved logs
-    #         if isinstance(data, np.number):
-    #             data = [float(data)]
-    #         else:
-    #             data = [data]
-    #     elif isinstance(data, torch.Tensor):
-    #         data = [float(data.cpu().numpy())]
-    #     elif not isinstance(data, (list, np.ndarray)):
-    #         data = [data]
-        
-    #     # Convert numpy values to Python float in lists/arrays
-    #     if isinstance(data, (list, np.ndarray)):
-    #         data = [float(x) if isinstance(x, np.number) else x for x in data]
-            
-    #     if self.stage == 'train' or self.args.validate:
-    #         if "iter_" + key not in log:
-    #             log["iter_" + key] = []
-    #         log["iter_" + key].extend(data)
-            
-    #     if self.stage + "_" + key not in log:
-    #         log[self.stage + "_" + key] = []
-    #     log[self.stage + "_" + key].extend(data)
-
 class LLMFlowWrapper(ModelWrapper):
-    def __init__(self, cfg, args, training=True):
+    def __init__(self, config, args, training=True):
         super().__init__()
         self.save_hyperparameters()
-        self.cfg = cfg
+        self.cfg = config
         self.args = args
 
-        self.esm_model = ESMFold(cfg.model,
+        self.esm_model = ESMFold(config.model,
                 extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
         if args.ckpt is None:
-            rank_zero_info("Loading the model esmfold")
+            rank_zero_info("Loading the model esmfold in LLMFlowWrapper")
             path = "/share/project/xiaohongwang/Routine_ckpts/esm_pretrained_models/esm2_t33_650M_UR50D.pt"
             model_data = torch.load(path)
             model_state = model_data["model"]
             self.esm_model.load_state_dict(model_state, strict=False)
-            rank_zero_info("Model esmfold has been loaded")
+            rank_zero_info("Model esmfold has been loaded in LLMFlowWrapper")
         
-        self.evoformer_stack = self.esm_model.trunk
-        self.structure_module = self.esm_model.trunk.structure_module
+        self.encoder = self.esm_model
+        self.decoder = None
         self.model = LLMFlow(
             num_text_tokens = 21,  # Number of amino acids
-            dim_latent = 21,  # Latent dimension for protein representation
+            dim_latent = 2048,  # Latent dimension for protein representation
             channel_first_latent = False,  # Protein data is not channel-first
-            modality_default_shape = (512,),  # Maximum sequence length
-            modality_encoder = self.evoformer_stack,
-            modality_decoder = self.structure_module,
+            modality_default_shape = (256, 256),  # Maximum sequence length
+            modality_encoder = self.encoder,
+            modality_decoder = self.decoder,
             pre_post_transformer_enc_dec = (
                 nn.Linear(21, 2048),  # Adapt latent dimension to transformer dimension
                 nn.Linear(2048, 21),
             ),
             add_pos_emb = True,  # Important for sequence data
-            modality_num_dim = 1,  # 1D sequence data
+            modality_num_dim = 2,
             fallback_to_default_shape_if_invalid = True,
             reconstruction_loss_weight = 1.0,
             transformer={
@@ -664,16 +637,20 @@ class LLMFlowWrapper(ModelWrapper):
                 'use_gradient_checkpointing': True
             },
         )
-        
-        if not args.no_ema:
+
+        if training:
+            if args and 'distillation' in args.__dict__ and args.distillation:
+                self.teacher = ESMFold(config.model, extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
+            self.loss = AlphaFoldLoss(config.loss, esmfold=True)
             self.ema = ExponentialMovingAverage(
-                model=self.model, decay=cfg.ema.decay
+                model=self.model, decay=config.ema.decay
             )
+            self.cached_weights = None
         
         self._log = defaultdict(list)
 
-        # self.harmonic_prior = HarmonicPrior(cfg.data.train.crop_size)
-        self.gaussian_prior = GaussianPrior(cfg.data.train.crop_size)
+        # self.harmonic_prior = HarmonicPrior(config.data.train.crop_size)
+        self.gaussian_prior = GaussianPrior(config.data.train.crop_size)
         self.generator = torch.Generator().manual_seed(137)
         self.last_log_time = time.time()
         self.iter_step = 0

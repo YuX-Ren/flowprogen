@@ -6,7 +6,7 @@ logger = get_logger(__name__)
 
 import torch, tqdm, os, wandb
 import pandas as pd
-
+import torch.distributed as dist
 from functools import partial
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -33,7 +33,7 @@ data_cfg.common.max_recycling_iters = 0
 
 def load_clusters(path):
     cluster_size = []
-    with open(args.pdb_clusters) as f:
+    with open(path) as f:
         for line in f:
             names = line.split()
             for name in names:
@@ -95,6 +95,16 @@ def main(args):
         shuffle=not args.filter_chains,
     )
 
+    is_global_zero = not dist.is_initialized() or dist.get_rank() == 0
+    if args.wandb and is_global_zero:
+        wandb_logger = WandbLogger(
+                project="flowprogen",
+                name=args.run_name,             
+                save_dir="./",            
+                log_model=False,                   
+            )  
+    else:
+        wandb_logger = False
     trainer = pl.Trainer(
         accelerator="gpu",
         strategy="deepspeed_stage_2",
@@ -102,28 +112,21 @@ def main(args):
         limit_train_batches=args.limit_batches or 1.0,
         limit_val_batches=args.limit_batches or 1.0,
         num_sanity_val_steps=0,
-        enable_progress_bar=not args.wandb,
+        enable_progress_bar=True,
         gradient_clip_val=args.grad_clip,
         callbacks=[ModelCheckpoint(
             dirpath=os.environ["MODEL_DIR"], 
-            save_top_k=2,
+            save_top_k=1,
             monitor='val/min_ref_rmsd',
             mode='min',
             every_n_epochs=args.ckpt_freq,
         )],
         accumulate_grad_batches=args.accumulate_grad,
         check_val_every_n_epoch=args.val_freq,
-        logger=False,
+        logger=wandb_logger,
+        log_every_n_steps=10,
     )
     
-    if args.wandb and trainer.is_global_zero:
-        wandb.init(
-            # entity=os.environ["WANDB_ENTITY"],
-            settings=wandb.Settings(start_method="fork"),
-            project="flowprogen",
-            name=args.run_name,
-            config=args,
-        )
     if args.mode == 'transflow':
         model = TransFlowWrapper(config, args)
     elif args.mode == 'llmflow':
@@ -141,6 +144,8 @@ def main(args):
         trainer.validate(model, val_loader, ckpt_path=args.ckpt)
     else: # train and validate
         trainer.fit(model, train_loader, val_loader, ckpt_path=args.ckpt)
+    
+    wandb.finish()
 
 if __name__ == "__main__":
     parser = ArgumentParser()
