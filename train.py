@@ -11,15 +11,16 @@ from functools import partial
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.strategies import DeepSpeedStrategy, DDPStrategy
 # from lightning.pytorch.callbacks import ModelCheckpoint
 from openfold.utils.exponential_moving_average import ExponentialMovingAverage
 from flowprogen.model.wrapper import TransFlowWrapper, LLMFlowWrapper
 
-torch.set_float32_matmul_precision("high")
+# torch.set_float32_matmul_precision("high")
 from flowprogen.config import model_config
 from flowprogen.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
 from flowprogen.data.inference import CSVDataset, AlphaFoldCSVDataset
-
+torch._dynamo.config.optimize_ddp=False
 config = model_config(
     'initial_training',
     train=True, 
@@ -41,7 +42,6 @@ def load_clusters(path):
     return pd.DataFrame(cluster_size).set_index('name')
     
 def main(args):
-    
     pdb_chains = pd.read_csv(args.pdb_chains, index_col='name')
 
     if args.filter_chains:
@@ -87,12 +87,17 @@ def main(args):
         collate_fn=OpenFoldBatchCollator(),
         num_workers=args.num_workers,
     )
+    
     train_loader = torch.utils.data.DataLoader(
         trainset,
         batch_size=args.batch_size,
         collate_fn=OpenFoldBatchCollator(),
         num_workers=args.num_workers,
+        pin_memory=True,
         shuffle=not args.filter_chains,
+        persistent_workers=True,
+        prefetch_factor=2,
+        drop_last=True
     )
 
     is_global_zero = not dist.is_initialized() or dist.get_rank() == 0
@@ -107,7 +112,10 @@ def main(args):
         wandb_logger = False
     trainer = pl.Trainer(
         accelerator="gpu",
-        strategy="deepspeed_stage_2",
+        devices="auto",
+        # strategy=DeepSpeedStrategy(stage=2, config='./zero2.json'),
+        strategy=DDPStrategy(find_unused_parameters=True,
+                             gradient_as_bucket_view=True),
         max_epochs=args.epochs,
         limit_train_batches=args.limit_batches or 1.0,
         limit_val_batches=args.limit_batches or 1.0,
@@ -125,6 +133,7 @@ def main(args):
         check_val_every_n_epoch=args.val_freq,
         logger=wandb_logger,
         log_every_n_steps=10,
+        use_distributed_sampler=True,
     )
     
     if args.mode == 'transflow':
@@ -140,6 +149,11 @@ def main(args):
                 model=model.model, decay=config.ema.decay
             ) # need to initialize EMA this way at the beginning
     
+    # 在训练循环开始前添加内存清理
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
+    
     if args.validate: # only validate
         trainer.validate(model, val_loader, ckpt_path=args.ckpt)
     else: # train and validate
@@ -151,6 +165,7 @@ if __name__ == "__main__":
     parser = ArgumentParser()
 
     parser.add_argument("--mode", choices=['transflow', 'llmflow'], default='transflow')
+    parser.add_argument("--local_rank", type=int, default=-1)
     
     ## Trainer settings
     parser.add_argument("--ckpt", type=str, default=None)
