@@ -296,13 +296,13 @@ class ModelWrapper(pl.LightningModule):
                 if "iter_" in key:
                     del self._log[key]
     
-    def log(self, key, data):
-        if isinstance(data, torch.Tensor):
-            data = data.cpu().numpy()
-        log = self._log
-        if self.stage == 'train' or self.args.validate:
-            log["iter_" + key].extend(data)
-        log[self.stage + "_" + key].extend(data)
+    # def log(self, key, data):
+    #     if isinstance(data, torch.Tensor):
+    #         data = data.cpu().numpy()
+    #     log = self._log
+    #     if self.stage == 'train' or self.args.validate:
+    #         log["iter_" + key].extend(data)
+    #     log[self.stage + "_" + key].extend(data)
 
     def on_train_epoch_end(self):
         log = self._log
@@ -310,7 +310,6 @@ class ModelWrapper(pl.LightningModule):
         log = gather_log(log, self.trainer.world_size)
         mean_log = get_log_mean(log)
         mean_log.update({'epoch': self.trainer.current_epoch, 'step': self.trainer.global_step})
-        # rank_zero_info({'epoch': self.trainer.current_epoch, 'step': self.trainer.global_step})
             
         if self.trainer.is_global_zero:
             logger.info(str(mean_log))
@@ -341,7 +340,7 @@ class ModelWrapper(pl.LightningModule):
             )
             pd.DataFrame(log).to_csv(path)
 
-        for key in list(log.keys()):
+        for key in list(log.keys()):    
             if "val_" in key:
                 del self._log[key]
 
@@ -591,9 +590,9 @@ class TransFlowWrapper(ModelWrapper):
         
         if torch.rand(1, generator=self.generator).item() < self.args.noise_prob:
             self._add_noise(batch)
-            self.log('time', batch['t'].mean().item())
+            self.log('train/time', float(batch['t'].mean().item()))
         else:
-            self.log('time', 1)
+            self.log('train/time', float(1.0))
         
         if self.args.extra_input:
             if torch.rand(1, generator=self.generator).item() < self.args.extra_input_prob:
@@ -626,28 +625,20 @@ class TransFlowWrapper(ModelWrapper):
             
             with torch.no_grad():
                 metrics = self._compute_validation_metrics(batch, outputs, superimposition_metrics=False)
-            
-            self.log('flow_loss', [float(flow_loss.item())])
-            for k, v in loss_breakdown.items():
-                self.log(k, [float(v.item())])
-            for k, v in metrics.items():
-                self.log(k, [float(v)])
-
-            self.log('dur', [float(time.time() - self.last_log_time)])
-            self.last_log_time = time.time()
 
             # added by hwxiao, use default log()
-            # self.log('flow_loss', flow_loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size)
-            # for k, v in loss_breakdown.items():
-            #     self.log(k, v, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size)
-            # for k, v in metrics.items():
-            #     self.log(k, v, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size)
-
-            # self.log('dur', time.time() - self.last_log_time, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size)
-            # self.last_log_time = time.time()
+            self.log(f'{self.stage}/flow_loss', flow_loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
+            for k, v in loss_breakdown.items():
+                self.log(f'{self.stage}/'+k, v.item(), prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
+            for k, v in metrics.items():
+                self.log(f'{self.stage}/'+k, v.item(), prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
+        
+            self.log(f'{self.stage}/dur', time.time() - self.last_log_time, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
+            self.last_log_time = time.time()
             return loss
 
     def validation_step(self, batch, batch_idx):
+        batch_size = batch['aatype'].shape[0]
         if not self.args.no_ema:
             if(self.cached_weights is None):
                 self.load_ema_weights()
@@ -662,7 +653,6 @@ class TransFlowWrapper(ModelWrapper):
         self.stage = 'val'
         # At the start of validation, load the EMA weights
         ref_prot = batch['ref_prot'][0]
-        # print('ref_prot:', ref_prot)
         
         pred_prots = []
         for _ in range(self.args.val_samples):
@@ -674,7 +664,7 @@ class TransFlowWrapper(ModelWrapper):
 
         first_metrics = protein.global_metrics(ref_prot, prots[0])
         for key in first_metrics:
-            self.log('first_ref_'+key, first_metrics[key])
+            self.log(f'{self.stage}/first_ref_'+key, first_metrics[key], prog_bar=True, on_step=False, on_epoch=True, batch_size=batch_size, sync_dist=True)
 
         ref_metrics = []
         for pred_prot in pred_prots:
@@ -685,21 +675,79 @@ class TransFlowWrapper(ModelWrapper):
             pred_prot2 = pred_prots[(i+1) % len(pred_prots)]
             self_metrics.append(protein.global_metrics(pred_prot1, pred_prot2, lddt=True))
         
-        self.log('name', [batch['name']])
+        name_hash = hash(', '.join(batch['name']))
+        self.log(f'{self.stage}/name', float(name_hash), batch_size=batch_size, sync_dist=True)
         
         ref_metrics = pd.DataFrame(ref_metrics)
         for key in ref_metrics:
-            print('****',ref_metrics[key].mean())
-            self.log('mean_ref_'+key, ref_metrics[key].mean())
-            self.log('max_ref_'+key, ref_metrics[key].max()) 
-            self.log('min_ref_'+key, ref_metrics[key].min()) 
+            self.log(f'{self.stage}/mean_ref_'+key, ref_metrics[key].mean(), prog_bar=True, on_step=False, on_epoch=True, batch_size=batch_size, sync_dist=True)
+            self.log(f'{self.stage}/max_ref_'+key, ref_metrics[key].max(), prog_bar=True, on_step=False, on_epoch=True, batch_size=batch_size, sync_dist=True) 
+            self.log(f'{self.stage}/min_ref_'+key, ref_metrics[key].min(), prog_bar=True, on_step=False, on_epoch=True, batch_size=batch_size, sync_dist=True) 
         
         self_metrics = pd.DataFrame(self_metrics)
         for key in self_metrics:
-            self.log('self_'+key, self_metrics[key].mean())
+            self.log(f'{self.stage}/self_'+key, self_metrics[key].mean(), prog_bar=True, on_step=False, on_epoch=True, batch_size=batch_size, sync_dist=True)
         
         if self.args.validate:
             self.try_print_log()
+
+    def on_train_epoch_end(self):
+        train_log = {}
+        for k, v in self.trainer.logged_metrics.items():
+            if k.startswith('train/'):
+                if isinstance(v, torch.Tensor):
+                    train_log[k] = v.detach().cpu().numpy().tolist()
+                else:
+                    train_log[k] = v
+        train_log = gather_log(train_log, self.trainer.world_size)
+        train_log = get_log_mean(train_log)
+        train_log.update({
+            'epoch': self.trainer.current_epoch,
+            'step': self.trainer.global_step
+        })
+        
+        if self.trainer.is_global_zero:
+            logger.info(f"Train metrics: {train_log}")
+            
+            if self.args.wandb:
+                wandb.log(train_log)
+                
+            path = os.path.join(
+                os.environ["MODEL_DIR"], f"train_{self.trainer.current_epoch}.csv"
+            )
+            pd.DataFrame([train_log]).to_csv(path, index=False)
+            
+    def on_validation_epoch_end(self):
+        if not self.args.no_ema:
+            self.restore_cached_weights()
+            
+        # Get validation metrics from Lightning's callback metrics
+        # which are collected during validation_step
+        val_log = {}
+        for k, v in self.trainer.callback_metrics.items():
+            if k.startswith('val/'):
+                if isinstance(v, torch.Tensor):
+                    val_log[k] = v.detach().cpu().numpy().tolist()
+                else:
+                    val_log[k] = v
+        
+        # Gather logs from all processes if using distributed training
+        val_log = gather_log(val_log, self.trainer.world_size)
+        val_log = get_log_mean(val_log)
+
+        if self.trainer.is_global_zero:
+            # Log validation metrics summary
+            logger.info(f"Validation metrics: {val_log}")
+            
+            # Log to wandb if enabled
+            if self.args.wandb:
+                wandb.log(val_log)
+
+            # Save validation metrics to CSV
+            path = os.path.join(
+                os.environ["MODEL_DIR"], f"val_{self.trainer.current_epoch}.csv"
+            )
+            pd.DataFrame([val_log]).to_csv(path, index=False)
 
     def inference(self, batch, as_protein=False, no_diffusion=False, self_cond=True, noisy_first=False, schedule=None):
         N = batch['aatype'].shape[1]
@@ -787,7 +835,7 @@ class TransFlowWrapper(ModelWrapper):
             # output["chain_index"] = chain_index
             if self_cond:
                 prev_outputs = output
-        # print("*********")
+
         del batch['noised_pseudo_beta_dists'], batch['t']
         if as_protein:
             prots = []
@@ -797,34 +845,35 @@ class TransFlowWrapper(ModelWrapper):
         else:
             return outputs
 
-    def log(self, key, data):
-        if isinstance(data, torch.Tensor):
-            data = data.cpu().numpy()
-        log = self._log
-        # Convert scalar values to lists before extending
-        if isinstance(data, (float, int, np.number)):
-            # Convert numpy number types to Python float to avoid np.float64 in saved logs
-            if isinstance(data, np.number):
-                data = [float(data)]
-            else:
-                data = [data]
-        elif isinstance(data, torch.Tensor):
-            data = [float(data.cpu().numpy())]
-        elif not isinstance(data, (list, np.ndarray)):
-            data = [data]
+    # def log(self, key, data):
+    #     if isinstance(data, torch.Tensor):
+    #         data = data.cpu().numpy()
+    #     log = self._log
+    #     # Convert scalar values to lists before extending
+    #     if isinstance(data, (float, int, np.number)):
+    #         # Convert numpy number types to Python float to avoid np.float64 in saved logs
+    #         if isinstance(data, np.number):
+    #             data = [float(data)]
+    #         else:
+    #             data = [data]
+    #     elif isinstance(data, torch.Tensor):
+    #         data = [float(data.cpu().numpy())]
+    #     elif not isinstance(data, (list, np.ndarray)):
+    #         data = [data]
         
-        # Convert numpy values to Python float in lists/arrays
-        if isinstance(data, (list, np.ndarray)):
-            data = [float(x) if isinstance(x, np.number) else x for x in data]
+    #     # Convert numpy values to Python float in lists/arrays
+    #     if isinstance(data, (list, np.ndarray)):
+    #         data = [float(x) if isinstance(x, np.number) else x for x in data]
             
-        if self.stage == 'train' or self.args.validate:
-            if "iter_" + key not in log:
-                log["iter_" + key] = []
-            log["iter_" + key].extend(data)
+    #     if self.stage == 'train' or self.args.validate:
+    #         if "iter_" + key not in log:
+    #             log["iter_" + key] = []
+    #         log["iter_" + key].extend(data)
             
-        if self.stage + "_" + key not in log:
-            log[self.stage + "_" + key] = []
-        log[self.stage + "_" + key].extend(data)
+    #     if self.stage + "_" + key not in log:
+    #         log[self.stage + "_" + key] = []
+    #     log[self.stage + "_" + key].extend(data)
+
 
 class LLMFlowWrapper(ModelWrapper):
     def __init__(self, cfg, args, training=True):
