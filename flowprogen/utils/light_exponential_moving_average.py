@@ -9,7 +9,6 @@ def exists(val):
 
 class LightExponentialMovingAverage:
     def __init__(self, model: nn.Module, decay: float = 0.9999,
-                 forward_method_names: tuple[str, ...] = ('forward_modality', 'forward', 'sample', 'generate_text_only','generate_modality_only'),
                 ignore_names: set[str] = set(),
                 ignore_startswith_names: set[str] = set(),
                 ):
@@ -26,11 +25,6 @@ class LightExponentialMovingAverage:
         
         self.ignore_names = ignore_names
         self.ignore_startswith_names = ignore_startswith_names
-
-        # self.forward_method_names = forward_method_names
-        # for forward_method_name in self.forward_method_names:
-        #     fn = getattr(model, forward_method_name)
-        #     setattr(self, forward_method_name, fn)
 
     def get_params_iter(self, model):
         for name, param in model.named_parameters():
@@ -54,5 +48,3 @@ class LightExponentialMovingAverage:
         self.params = tensor_tree_map(lambda t: t.to(device), self.params)
         self.device = device
         self.ema_transformer = self.ema_transformer.to(device)
-        # for name, para in self.ema_transformer.named_parameters():
-        #     para.data = para.data.to(device)
