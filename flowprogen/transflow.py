@@ -1951,7 +1951,8 @@ class TransFlow(Module):
         velocity_consistency_ema_model: TransFlow | EMA | ExponentialMovingAverage | None = None,
         velocity_consistency_delta_time = 1e-5,
         return_loss = True,
-        return_loss_breakdown = False
+        return_loss_breakdown = False,
+        transformer: nn.Module | None = None,
     ) -> Scalar | Float['b ...']:
 
         requires_velocity_consistency = exists(velocity_consistency_ema_model)
@@ -2105,7 +2106,7 @@ class TransFlow(Module):
 
         # attention
 
-        embed = self.transformer(
+        embed = transformer(
             noised_tokens,
             times = times,
             modality_only = True,
@@ -2129,12 +2130,14 @@ class TransFlow(Module):
         if requires_velocity_consistency:
 
             with torch.no_grad():
-                flow_with_delta_time = velocity_consistency_ema_model.forward_modality(
+                flow_with_delta_time = self.forward_modality(
                     modalities = modalities,
                     modality_type = modality_type,
                     times = orig_times + velocity_consistency_delta_time,
                     encode_modality = False, # modality already encoded
-                    return_loss = False
+                    return_loss = False,
+                    transformer=velocity_consistency_ema_model.ema_transformer,
+                    velocity_consistency_ema_model = None
                 )
 
             velocity_loss = F.mse_loss(flow, flow_with_delta_time)

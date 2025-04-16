@@ -16,6 +16,9 @@ from openfold.utils.superimposition import superimpose
 from openfold.utils.feats import pseudo_beta_fn
 from openfold.data import data_transforms
 from openfold.utils.exponential_moving_average import ExponentialMovingAverage
+from flowprogen.utils.new_exponential_moving_average import newExponentialMovingAverage
+from flowprogen.utils.light_exponential_moving_average import LightExponentialMovingAverage
+from flowprogen.utils.new_ema_pytorch import EMA
 
 import pytorch_lightning as pl
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
@@ -147,13 +150,10 @@ class ModelWrapper(pl.LightningModule):
         self.stage = stage
         
         if not self.args.no_ema:
-            if(self.ema.device != device):
+            ema_device = self.ema.device
+            if(ema_device != device):
                 self.ema.to(device)
-                if self.ema_model is None:
-                    import copy
-                    self.ema_model = copy.deepcopy(self.model)
-                    self.ema_model.load_state_dict(self.ema.state_dict()['params']) #['params', 'decay']
-                    rank_zero_info('self.ema_model loaded')
+                
         
         if self.args.distillation:
             return self.distillation_training_step(batch)
@@ -182,17 +182,13 @@ class ModelWrapper(pl.LightningModule):
             modality_type=0,
             return_loss=True,
             return_loss_breakdown=True,
-            velocity_consistency_ema_model=None # if == self.ema (ExponentialMovingAverage), velocity_consistency_ema_model has no attribute 'forward_modality'; is == self.ema (EMA), run OOM;
+            transformer=self.model.transformer,
+            velocity_consistency_ema_model=self.ema if not self.args.no_ema else None
         )
         
         if isinstance(result, tuple) and len(result) == 2:
             outputs, (flow_loss, velocity_loss) = result
             loss, loss_breakdown = self.loss(outputs, batch, _return_breakdown=True)
-            
-            # Ensure losses are properly detached and have gradients
-            # flow_loss = flow_loss.detach().requires_grad_(True)
-            # velocity_loss = velocity_loss.detach().requires_grad_(True)
-            # loss = loss.detach().requires_grad_(True)
             
             with torch.no_grad():
                 metrics = self._compute_validation_metrics(batch, outputs, superimposition_metrics=False)
@@ -265,7 +261,7 @@ class ModelWrapper(pl.LightningModule):
             self.try_print_log()
 
     def restore_cached_weights(self):
-        logger.info('Restoring cached weights')
+        rank_zero_info('Restoring cached weights')
         self.model.load_state_dict(self.cached_weights)
         self.cached_weights = None
 
@@ -273,20 +269,36 @@ class ModelWrapper(pl.LightningModule):
         # model.state_dict() contains references to model weights rather
         # than copies. Therefore, we need to clone them before calling 
         # load_state_dict().
-        logger.info('Loading EMA weights')
+        rank_zero_info('Loading EMA weights')
         clone_param = lambda t: t.detach().clone()
         self.cached_weights = tensor_tree_map(clone_param, self.model.state_dict())
-        self.model.load_state_dict(self.ema.state_dict()["params"])
+        if isinstance(self.ema, EMA):
+            self.ema.copy_params_from_ema_to_model()
+        elif isinstance(self.ema, ExponentialMovingAverage):
+            self.model.load_state_dict(self.ema.state_dict()["params"])
+        elif isinstance(self.ema, newExponentialMovingAverage):
+            self.model.load_state_dict(self.ema.state_dict()["params"])
+        elif isinstance(self.ema, LightExponentialMovingAverage):
+            self.ema.apply_to(self.model)   
+
         
     def on_before_zero_grad(self, *args, **kwargs):
         if not self.args.no_ema:
-            self.ema.update(self.model)
+            if isinstance(self.ema, EMA):
+                self.ema.update()
+            elif isinstance(self.ema, ExponentialMovingAverage):
+                self.ema.update(self.model)
+            elif isinstance(self.ema, newExponentialMovingAverage):
+                self.ema.update(self.model)
+            elif isinstance(self.ema, LightExponentialMovingAverage):
+                self.ema.update()
+                self.ema.apply_to(self.model)
 
     def on_load_checkpoint(self, checkpoint):
         if 'distillation' not in self.args.__dict__:
             self.args.distillation = False
         if self.args.distillation:
-            logger.info('Loading teacher model')
+            rank_zero_info('Loading teacher model')
             def upgrade_state_dict(state_dict):
                 import re
                 """Removes prefixes 'model.encoder.sentence_encoder.' and 'model.encoder.'."""
@@ -298,9 +310,9 @@ class ModelWrapper(pl.LightningModule):
                 self.teacher.load_state_dict(upgrade_state_dict(checkpoint['state_dict']))
                 self.teacher.requires_grad_(False)
             except:
-                logger.info('Loading teacher model failed, this is expected at distilled inference-time')                
+                rank_zero_info('Loading teacher model failed, this is expected at distilled inference-time')                
             
-        logger.info('Loading EMA state dict')
+        rank_zero_info('Loading EMA state dict')
         if not self.args.no_ema:
             ema = checkpoint["ema"]
             self.ema.load_state_dict(ema)
@@ -309,7 +321,12 @@ class ModelWrapper(pl.LightningModule):
         if self.cached_weights is not None:
             self.restore_cached_weights()
         if not self.args.no_ema:
-            checkpoint["ema"] = self.ema.state_dict()
+            if isinstance(self.ema, ExponentialMovingAverage):
+                checkpoint["ema"] = self.ema.state_dict()
+            elif isinstance(self.ema, newExponentialMovingAverage):
+                checkpoint["ema"] = self.ema.state_dict()
+            elif isinstance(self.ema, LightExponentialMovingAverage):
+                checkpoint["ema"] = self.ema.ema_transformer.state_dict()
         
     def try_print_log(self):
         print_log = {}
@@ -326,8 +343,7 @@ class ModelWrapper(pl.LightningModule):
             print_log = get_log_mean(print_log)
             print_log.update({'epoch': self.trainer.current_epoch, 'step': self.trainer.global_step})
             if self.trainer.is_global_zero:
-                logger.info(f"print_log: {str(print_log)}")
-                logger.info(f"print_log: {print_log}")
+                rank_zero_info(f"print_log: {print_log}")
                 if self.args.wandb:
                     wandb.log(print_log)
     
@@ -347,7 +363,7 @@ class ModelWrapper(pl.LightningModule):
         })
         
         if self.trainer.is_global_zero:
-            logger.info(f"Train metrics: {train_log}")
+            rank_zero_info(f"Train metrics: {train_log}")
             
             if self.args.wandb:
                 wandb.log(train_log)
@@ -376,7 +392,7 @@ class ModelWrapper(pl.LightningModule):
         val_log = get_log_mean(val_log)
 
         if self.trainer.is_global_zero:
-            logger.info(f"Validation metrics: {val_log}")
+            rank_zero_info(f"Validation metrics: {val_log}")
             
             if self.args.wandb:
                 wandb.log(val_log)
@@ -601,12 +617,20 @@ class TransFlowWrapper(ModelWrapper):
             if args and 'distillation' in args.__dict__ and args.distillation:
                 self.teacher = ESMFold(config.model, extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
             self.loss = AlphaFoldLoss(config.loss, esmfold=True)
-            self.ema = ExponentialMovingAverage(
+
+            # self.ema = ExponentialMovingAverage(
+            #     model=self.model, decay=config.ema.decay
+            # )
+            # self.ema = newExponentialMovingAverage(
+            #     model=self.model, decay=config.ema.decay
+            # )
+            self.ema = LightExponentialMovingAverage(
                 model=self.model, decay=config.ema.decay
             )
-
+            # self.ema = EMA(
+            #     model=self.model, beta=config.ema.decay
+            # )
             self.cached_weights = None
-        
 
         # self.harmonic_prior = HarmonicPrior(config.data.train.crop_size)
         self.gaussian_prior = GaussianPrior(config.data.train.crop_size)
@@ -628,7 +652,7 @@ class LLMFlowWrapper(ModelWrapper):
             path = "/share/project/xiaohongwang/Routine_ckpts/esm_pretrained_models/esm2_t33_650M_UR50D.pt"
             model_data = torch.load(path)
             model_state = model_data["model"]
-            self.esm_model.load_state_dict(model_state, strict=False)
+            esm_model.load_state_dict(model_state, strict=False)
             rank_zero_info("Model ESMFold has been loaded in LLMFlowWrapper")
         
         self.model = LLMFlow(
@@ -658,8 +682,11 @@ class LLMFlowWrapper(ModelWrapper):
             if args and 'distillation' in args.__dict__ and args.distillation:
                 self.teacher = ESMFold(config.model, extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
             self.loss = AlphaFoldLoss(config.loss, esmfold=True)
-            self.ema = ExponentialMovingAverage(
-                model=self.model, decay=config.ema.decay
+            # self.ema = newExponentialMovingAverage(
+            #     model=self.model, decay=config.ema.decay
+            # )
+            self.ema = EMA(
+                model=self.model, beta=config.ema.decay
             )
             self.cached_weights = None
         
