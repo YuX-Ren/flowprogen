@@ -16,9 +16,7 @@ from openfold.utils.superimposition import superimpose
 from openfold.utils.feats import pseudo_beta_fn
 from openfold.data import data_transforms
 from openfold.utils.exponential_moving_average import ExponentialMovingAverage
-from flowprogen.utils.new_exponential_moving_average import newExponentialMovingAverage
 from flowprogen.utils.light_exponential_moving_average import LightExponentialMovingAverage
-from flowprogen.utils.new_ema_pytorch import EMA
 
 import pytorch_lightning as pl
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
@@ -272,11 +270,7 @@ class ModelWrapper(pl.LightningModule):
         rank_zero_info('Loading EMA weights')
         clone_param = lambda t: t.detach().clone()
         self.cached_weights = tensor_tree_map(clone_param, self.model.state_dict())
-        if isinstance(self.ema, EMA):
-            self.ema.copy_params_from_ema_to_model()
-        elif isinstance(self.ema, ExponentialMovingAverage):
-            self.model.load_state_dict(self.ema.state_dict()["params"])
-        elif isinstance(self.ema, newExponentialMovingAverage):
+        if isinstance(self.ema, ExponentialMovingAverage):
             self.model.load_state_dict(self.ema.state_dict()["params"])
         elif isinstance(self.ema, LightExponentialMovingAverage):
             self.ema.apply_to(self.model)   
@@ -284,11 +278,7 @@ class ModelWrapper(pl.LightningModule):
         
     def on_before_zero_grad(self, *args, **kwargs):
         if not self.args.no_ema:
-            if isinstance(self.ema, EMA):
-                self.ema.update()
-            elif isinstance(self.ema, ExponentialMovingAverage):
-                self.ema.update(self.model)
-            elif isinstance(self.ema, newExponentialMovingAverage):
+            if isinstance(self.ema, ExponentialMovingAverage):
                 self.ema.update(self.model)
             elif isinstance(self.ema, LightExponentialMovingAverage):
                 self.ema.update()
@@ -322,8 +312,6 @@ class ModelWrapper(pl.LightningModule):
             self.restore_cached_weights()
         if not self.args.no_ema:
             if isinstance(self.ema, ExponentialMovingAverage):
-                checkpoint["ema"] = self.ema.state_dict()
-            elif isinstance(self.ema, newExponentialMovingAverage):
                 checkpoint["ema"] = self.ema.state_dict()
             elif isinstance(self.ema, LightExponentialMovingAverage):
                 checkpoint["ema"] = self.ema.ema_transformer.state_dict()
@@ -621,15 +609,9 @@ class TransFlowWrapper(ModelWrapper):
             # self.ema = ExponentialMovingAverage(
             #     model=self.model, decay=config.ema.decay
             # )
-            # self.ema = newExponentialMovingAverage(
-            #     model=self.model, decay=config.ema.decay
-            # )
             self.ema = LightExponentialMovingAverage(
                 model=self.model, decay=config.ema.decay
             )
-            # self.ema = EMA(
-            #     model=self.model, beta=config.ema.decay
-            # )
             self.cached_weights = None
 
         # self.harmonic_prior = HarmonicPrior(config.data.train.crop_size)
@@ -685,8 +667,8 @@ class LLMFlowWrapper(ModelWrapper):
             # self.ema = newExponentialMovingAverage(
             #     model=self.model, decay=config.ema.decay
             # )
-            self.ema = EMA(
-                model=self.model, beta=config.ema.decay
+            self.ema = LightExponentialMovingAverage(
+                model=self.model, decay=config.ema.decay
             )
             self.cached_weights = None
         

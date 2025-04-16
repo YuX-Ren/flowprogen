@@ -9,10 +9,10 @@ import pandas as pd
 import torch.distributed as dist
 from functools import partial
 import pytorch_lightning as pl
+# from lightning.pytorch.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.strategies import DeepSpeedStrategy, DDPStrategy
-# from lightning.pytorch.callbacks import ModelCheckpoint
 from openfold.utils.exponential_moving_average import ExponentialMovingAverage
 from flowprogen.model.wrapper import TransFlowWrapper, LLMFlowWrapper
 
@@ -21,6 +21,8 @@ from flowprogen.config import model_config
 from flowprogen.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
 from flowprogen.data.inference import CSVDataset, AlphaFoldCSVDataset
 torch._dynamo.config.optimize_ddp=False
+
+
 config = model_config(
     'initial_training',
     train=True, 
@@ -41,7 +43,41 @@ def load_clusters(path):
                 cluster_size.append({'name': name, 'cluster_size': len(names)})
     return pd.DataFrame(cluster_size).set_index('name')
     
+def init_distributed_training(args):
+    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+        args.rank = int(os.environ['RANK'])
+        args.world_size = int(os.environ['WORLD_SIZE'])
+        args.gpu = int(os.environ['LOCAL_RANK'])
+    else:
+        print('Not using distributed mode')
+        args.distributed = False
+        return
+
+    args.distributed = True
+
+    torch.cuda.set_device(args.gpu)
+    print('| distributed init (rank {}): {}'.format(
+        args.rank, args.dist_url), flush=True)
+    dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
+                           world_size=args.world_size, rank=args.rank)
+    dist.barrier(device_ids=[torch.cuda.current_device()])
+
 def main(args):
+    # Initialize distributed training
+    init_distributed_training(args)
+
+    is_global_zero = not dist.is_initialized() or dist.get_rank() == 0
+
+    if args.wandb and is_global_zero:
+        wandb_logger = WandbLogger(
+                project="flowprogen",
+                name=args.run_name,             
+                save_dir="./",            
+                log_model=False,                   
+            )  
+    else:
+        wandb_logger = False
+
     pdb_chains = pd.read_csv(args.pdb_chains, index_col='name')
 
     if args.filter_chains:
@@ -75,7 +111,6 @@ def main(args):
             data_cfg,
             args.val_csv,
             mmcif_dir=args.mmcif_dir,
-            # data_dir=args.train_data_dir,
             msa_dir=args.val_msa_dir,
         )
     if args.filter_chains:
@@ -87,7 +122,10 @@ def main(args):
         collate_fn=OpenFoldBatchCollator(),
         num_workers=args.num_workers,
     )
+
     
+    # Create distributed sampler
+    # train_sampler = torch.utils.data.DistributedSampler(trainset, shuffle=not args.filter_chains)
     train_loader = torch.utils.data.DataLoader(
         trainset,
         batch_size=args.batch_size,
@@ -95,21 +133,12 @@ def main(args):
         num_workers=args.num_workers,
         pin_memory=True,
         shuffle=not args.filter_chains,
-        persistent_workers=True,
-        prefetch_factor=2,
-        drop_last=True
+        # persistent_workers=True,
+        # prefetch_factor=2,
+        # drop_last=True,
+        # sampler=train_sampler
     )
 
-    is_global_zero = not dist.is_initialized() or dist.get_rank() == 0
-    if args.wandb and is_global_zero:
-        wandb_logger = WandbLogger(
-                project="flowprogen",
-                name=args.run_name,             
-                save_dir="./",            
-                log_model=False,                   
-            )  
-    else:
-        wandb_logger = False
     trainer = pl.Trainer(
         accelerator="gpu",
         devices="auto",
@@ -149,7 +178,6 @@ def main(args):
                 model=model.model, decay=config.ema.decay
             ) # need to initialize EMA this way at the beginning
     
-    # 在训练循环开始前添加内存清理
     import gc
     gc.collect()
     torch.cuda.empty_cache()
@@ -166,6 +194,12 @@ if __name__ == "__main__":
 
     parser.add_argument("--mode", choices=['transflow', 'llmflow'], default='transflow')
     parser.add_argument("--local_rank", type=int, default=-1)
+    
+    # Add distributed training arguments
+    parser.add_argument("--dist_url", type=str, default="env://",
+                       help="url used to set up distributed training")
+    parser.add_argument("--dist_backend", type=str, default="nccl",
+                       help="distributed backend")
     
     ## Trainer settings
     parser.add_argument("--ckpt", type=str, default=None)
