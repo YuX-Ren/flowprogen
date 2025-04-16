@@ -21,6 +21,5 @@ torchrun --nproc_per_node=8 train.py \
     --val_msa_dir ./alignment_dir/cameo2022 \
     --mode transflow \
     --run_name transflow_esmfold \
-    --print_freq 100 \
-    --wandb \
-    --no_ema
+    --print_freq 1000 \
+    --wandb

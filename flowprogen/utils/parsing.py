@@ -62,7 +62,6 @@ def parse_train_args():
     
     args = parser.parse_args()
     os.environ["MODEL_DIR"] = os.path.join("workdir", args.run_name)
-    print(os.environ["MODEL_DIR"])
     # os.environ["WANDB_LOGGING"] = str(int(args.wandb))
     # # if args.wandb:
     #     if subprocess.check_output(["git", "status", "-s"]):

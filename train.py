@@ -255,8 +255,8 @@ if __name__ == "__main__":
     parser.add_argument("--run_name", type=str, default="default")
     
     args = parser.parse_args()
-    if not os.path.exists(os.path.join("workdir", args.run_name)):
-        os.makedirs(os.path.join("workdir", args.run_name))
+    
+    os.makedirs(os.path.join("workdir", args.run_name), exist_ok=True)
     os.environ["MODEL_DIR"] = os.path.join("workdir", args.run_name)
     # os.environ["WANDB_LOGGING"] = str(int(args.wandb))
     # # if args.wandb:
