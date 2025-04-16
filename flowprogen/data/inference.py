@@ -26,7 +26,7 @@ class AlphaFoldCSVDataset:
         self.templates_dir = templates_dir
         
     def __len__(self):
-        return len(self.pdb_chains)
+        return len(self.pdb_chains[:24])
         
     def __getitem__(self, idx):
 

@@ -8,7 +8,7 @@ from openfold.utils.tensor_utils import tensor_tree_map
 def exists(val):
     return val is not None
 
-class ExponentialMovingAverage(nn.Module):
+class newExponentialMovingAverage(nn.Module):
     """
     Maintains moving averages of parameters with exponential decay
 
@@ -23,7 +23,7 @@ class ExponentialMovingAverage(nn.Module):
     def __init__(self, model: nn.Module, 
                  ema_model: nn.Module | Callable[[], nn.Module] | None = None,
                  decay: float = 0.9999, 
-                 forward_method_names: tuple[str, ...] = ('forward_modality', 'forward', 'sample', 'generate_text_only')):
+                 forward_method_names: tuple[str, ...] = ('forward_modality', 'forward', 'sample', 'generate_text_only','generate_modality_only')):
         """
         Args:
             model:
@@ -32,25 +32,25 @@ class ExponentialMovingAverage(nn.Module):
                 A value (usually close to 1.) by which updates are
                 weighted as part of the above formula
         """
-        super(ExponentialMovingAverage, self).__init__()
+        super(newExponentialMovingAverage, self).__init__()
 
         clone_param = lambda t: t.clone().detach()
         self.params = tensor_tree_map(clone_param, model.state_dict())
         self.decay = decay
         self.device = next(model.parameters()).device
-        self.model = model
         self.forward_method_names = forward_method_names
-        self.init_ema(ema_model)
+        self.init_ema(ema_model, model)
     
     def init_ema(
         self,
-        ema_model: nn.Module | None = None
+        ema_model: nn.Module | None = None,
+        model: nn.Module | None = None
     ):
         self.ema_model = ema_model
 
         if not exists(self.ema_model):
             try:
-                self.ema_model = deepcopy(self.model)
+                self.ema_model = deepcopy(model)
             except Exception as e:
                 print(f'Error: While trying to deepcopy model: {e}')
                 print('Your model was not copyable. Please make sure you are not using any LazyLinear')
