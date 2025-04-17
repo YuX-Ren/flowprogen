@@ -19,7 +19,8 @@ class LightExponentialMovingAverage:
         self.decay = decay
         self.device = next(model.parameters()).device
 
-        for name, para in self.ema_transformer.named_parameters():
+        # for name, para in self.ema_transformer.named_parameters():
+        for para in self.params.values():
             para.requires_grad = False
             para.data = para.data.to(self.device)
         

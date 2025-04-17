@@ -16,7 +16,8 @@ from openfold.utils.superimposition import superimpose
 from openfold.utils.feats import pseudo_beta_fn
 from openfold.data import data_transforms
 from openfold.utils.exponential_moving_average import ExponentialMovingAverage
-from flowprogen.utils.light_exponential_moving_average import LightExponentialMovingAverage
+# from flowprogen.utils.light_exponential_moving_average_v2 import LightExponentialMovingAverage
+from flowprogen.utils.light_exponential_moving_average_v3 import LightExponentialMovingAverage
 
 import pytorch_lightning as pl
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
