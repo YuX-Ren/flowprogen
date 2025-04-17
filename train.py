@@ -68,16 +68,6 @@ def main(args):
 
     is_global_zero = not dist.is_initialized() or dist.get_rank() == 0
 
-    if args.wandb and is_global_zero:
-        wandb_logger = WandbLogger(
-                project="flowprogen",
-                name=args.run_name,             
-                save_dir="./",            
-                log_model=False,                   
-            )  
-    else:
-        wandb_logger = False
-
     pdb_chains = pd.read_csv(args.pdb_chains, index_col='name')
 
     if args.filter_chains:
@@ -139,6 +129,16 @@ def main(args):
         # sampler=train_sampler
     )
 
+    if args.wandb and is_global_zero:
+        wandb_logger = WandbLogger(
+                project="flowprogen",
+                name=args.run_name,             
+                save_dir="./",            
+                log_model=False,                   
+            )  
+    else:
+        wandb_logger = False
+
     trainer = pl.Trainer(
         accelerator="gpu",
         devices="auto",
@@ -170,6 +170,22 @@ def main(args):
     elif args.mode == 'llmflow':
         model = LLMFlowWrapper(config, args)
 
+    # total_params = 0
+    # trainable_params = 0
+    # transformer_total_params = 0
+    # transformer_trainable_params = 0
+    # for name, param in model.named_parameters():
+    #     numel = param.numel()
+    #     total_params += numel
+    #     if param.requires_grad:
+    #         trainable_params += numel
+    #     if 'transformer' in name:
+    #         transformer_total_params += numel
+    #         if param.requires_grad:
+    #             transformer_trainable_params += numel
+    # print(f"transformer params: {transformer_trainable_params / 1e6}M, transformer total params: {transformer_total_params / 1e6}M")
+    # print(f"Trainable params: {trainable_params / 1e6}M, Total params: {total_params / 1e6}M")
+
     if args.restore_weights_only:
         model.load_state_dict(torch.load(args.ckpt, map_location='cpu')['state_dict'], strict=False)
         args.ckpt = None
@@ -187,6 +203,9 @@ def main(args):
     else: # train and validate
         trainer.fit(model, train_loader, val_loader, ckpt_path=args.ckpt)
     
+    gc.collect()
+    torch.cuda.empty_cache()
+
     wandb.finish()
 
 if __name__ == "__main__":
