@@ -1,0 +1,1 @@
+python predict.py --mode transflow --input_csv splits/cameo2022.csv --weights epoch=0-step=625.ckpt --samples 1 --outpdb ./predict_pdb_transflow --self_cond --resample
