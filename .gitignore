@@ -171,3 +171,4 @@ results*
 workdir
 alignment_dir
 predict_pdb*
+*.ckpt

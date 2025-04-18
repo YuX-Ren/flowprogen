@@ -225,9 +225,10 @@ class ModelWrapper(pl.LightningModule):
         pred_prots = []
         for _ in range(self.args.val_samples):
             if self.args.distillation:
-                prots = self.inference(batch, no_diffusion=True, noisy_first=True, as_protein=True)
+                # prots = self.inference(batch, no_diffusion=True, noisy_first=True, as_protein=True)
+                prots = self.inference(batch, as_protein=True, fixed_modality_shape=(len(ref_prot.seqres), len(ref_prot.seqres)), modality_steps=1, no_flow=True)
             else:
-                prots = self.inference(batch, as_protein=True)
+                prots = self.inference(batch, as_protein=True, fixed_modality_shape=(len(ref_prot.seqres), len(ref_prot.seqres)), modality_steps=1)
             pred_prots.append(prots[-1])
 
         first_metrics = protein.global_metrics(ref_prot, prots[0])
@@ -398,101 +399,144 @@ class ModelWrapper(pl.LightningModule):
                 if p.grad is None:
                     print(name)
 
-    def inference(self, batch, as_protein=False, no_diffusion=False, self_cond=True, noisy_first=False, schedule=None):
-        N = batch['aatype'].shape[1]
-        device = batch['aatype'].device
-        # prior = HarmonicPrior(N)
-        prior = GaussianPrior(N)
-        prior.to(device)
-        noisy = prior.sample()
+    # def inference(self, batch, as_protein=False, no_diffusion=False, self_cond=True, noisy_first=False, schedule=None):
+    #     N = batch['aatype'].shape[1]
+    #     device = batch['aatype'].device
+    #     # prior = HarmonicPrior(N)
+    #     prior = GaussianPrior(N)
+    #     prior.to(device)
+    #     noisy = prior.sample()
 
-        sequences = batch["seqres"]
-        if isinstance(sequences, str):
-            sequences = [sequences]
-        aatype, mask, _residx, linker_mask, chain_index = batch_encode_sequences(
-            sequences, 512, "G" * 25
-        )
-        '''
-        chain_index:
-        tensor([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]])
-        '''
-        if not isinstance(_residx, torch.Tensor):
-            _residx = collate_dense_tensors(_residx)
+    #     sequences = batch["seqres"]
+    #     if isinstance(sequences, str):
+    #         sequences = [sequences]
+    #     aatype, mask, _residx, linker_mask, chain_index = batch_encode_sequences(
+    #         sequences, 512, "G" * 25
+    #     )
+    #     '''
+    #     chain_index:
+    #     tensor([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    #             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    #             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    #             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    #             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    #             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    #             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    #             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    #             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    #             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]])
+    #     '''
+    #     if not isinstance(_residx, torch.Tensor):
+    #         _residx = collate_dense_tensors(_residx)
 
-        aatype, mask, residx, linker_mask = map(
-            lambda x: x.to(device), (aatype, mask, _residx, linker_mask)
-        )
+    #     aatype, mask, residx, linker_mask = map(
+    #         lambda x: x.to(device), (aatype, mask, _residx, linker_mask)
+    #     )
 
-        if noisy_first:
-            batch['noised_pseudo_beta_dists'] = torch.sum((noisy.unsqueeze(-2) - noisy.unsqueeze(-3)) ** 2, dim=-1)**0.5
-            batch['t'] = torch.ones(1, device=noisy.device)
+    #     if noisy_first:
+    #         batch['noised_pseudo_beta_dists'] = torch.sum((noisy.unsqueeze(-2) - noisy.unsqueeze(-3)) ** 2, dim=-1)**0.5
+    #         batch['t'] = torch.ones(1, device=noisy.device)
             
-        if no_diffusion:
-            print("no_diffusion!")
-            # output = self.model(batch)
+    #     if no_diffusion:
+    #         print("no_diffusion!")
+    #         # output = self.model(batch)
+    #         s_s_0, s_z_0 = self.model.modality_encoder[0].get_encoder_outputs(batch)
+    #         # s_s_0, s_z_0 = self.model.modality_encoder[0].get_encoder_outputs(
+    #         #                 aatype=aatype,
+    #         #                 mask=mask,
+    #         #                 residx=residx,
+    #         #                 masking_pattern=None,
+    #         #                 num_recycles=4,
+    #         # )
+    #         output = self.model.modality_decoder[0].get_decoder_outputs(s_s_0, s_z_0, batch)
+    #         output["atom37_atom_exists"] = output[
+    #                 "atom37_atom_exists"
+    #             ] * linker_mask.unsqueeze(2)
+    #         # Expand plddt to match atom37_atom_exists dimensions and apply linker mask
+    #         plddt_expanded = output["plddt"].unsqueeze(2).expand(-1, -1, 37) * linker_mask.unsqueeze(2)
+    #         output["mean_plddt"] = (plddt_expanded * output["atom37_atom_exists"]).sum(dim=(1, 2)) / (output["atom37_atom_exists"].sum(dim=(1, 2)) + 1e-8)
+    #         # output["chain_index"] = chain_index
+
+    #         if as_protein:
+    #             return protein.output_to_protein({**output, **batch})
+    #         else:
+    #             return [{**output, **batch}]
+
+    #     if schedule is None:
+    #         schedule = np.array([1.0, 0.75, 0.5, 0.25, 0.1, 0]) 
+
+    #     outputs = []
+    #     prev_outputs = None
+    #     for t, s in zip(schedule[:-1], schedule[1:]):
+    #         s_s_0, s_z_0 = self.model.modality_encoder[0].get_encoder_outputs(batch, prev_outputs=prev_outputs)
+    #         output = self.model.modality_decoder[0].get_decoder_outputs(s_s_0, s_z_0, batch)
+    #         pseudo_beta = pseudo_beta_fn(batch['aatype'], output['final_atom_positions'], None)
+    #         outputs.append({**output, **batch})
+    #         noisy = rmsdalign(pseudo_beta, noisy)
+    #         noisy = (s / t) * noisy + (1 - s / t) * pseudo_beta
+    #         batch['noised_pseudo_beta_dists'] = torch.sum((noisy.unsqueeze(-2) - noisy.unsqueeze(-3)) ** 2, dim=-1)**0.5
+    #         batch['t'] = torch.ones(1, device=noisy.device) * s
+    #         output["atom37_atom_exists"] = output[
+    #                 "atom37_atom_exists"
+    #             ] * linker_mask.unsqueeze(2)
+    #         # Expand plddt to match atom37_atom_exists dimensions and apply linker mask
+    #         plddt_expanded = output["plddt"].unsqueeze(2).expand(-1, -1, 37) * linker_mask.unsqueeze(2)
+    #         output["mean_plddt"] = (plddt_expanded * output["atom37_atom_exists"]).sum(dim=(1, 2)) / (output["atom37_atom_exists"].sum(dim=(1, 2)) + 1e-8)
+    #         # output["chain_index"] = chain_index
+    #         if self_cond:
+    #             prev_outputs = output
+
+    #     del batch['noised_pseudo_beta_dists'], batch['t']
+    #     if as_protein:
+    #         prots = []
+    #         for output in outputs:
+    #             prots.extend(protein.output_to_protein(output))
+    #         return prots
+    #     else:
+    #         return outputs
+     
+    def inference(self, batch, 
+                  batch_size=1, 
+                  modality_type=0, 
+                  fixed_modality_shape=None, 
+                  modality_steps=16, 
+                  return_unprocessed_modalities=False, 
+                  as_protein=False,
+                  no_flow=False):
+        """
+        Perform inference using the model's generate_modality_only method.
+        
+        Args:
+            batch: Input batch data
+            batch_size: Number of samples to generate
+            modality_type: Type of modality to generate
+            fixed_modality_shape: Fixed shape for the generated modality
+            modality_steps: Number of ODE steps for sampling
+            return_unprocessed_modalities: Whether to return unprocessed modalities
+            as_protein: Whether to convert output to protein format
+            
+        Returns:
+            Generated modality samples
+        """
+        if no_flow:
             s_s_0, s_z_0 = self.model.modality_encoder[0].get_encoder_outputs(batch)
-            # s_s_0, s_z_0 = self.model.modality_encoder[0].get_encoder_outputs(
-            #                 aatype=aatype,
-            #                 mask=mask,
-            #                 residx=residx,
-            #                 masking_pattern=None,
-            #                 num_recycles=4,
-            # )
-            output = self.model.modality_decoder[0].get_decoder_outputs(s_s_0, s_z_0, batch)
-            output["atom37_atom_exists"] = output[
-                    "atom37_atom_exists"
-                ] * linker_mask.unsqueeze(2)
-            # Expand plddt to match atom37_atom_exists dimensions and apply linker mask
-            plddt_expanded = output["plddt"].unsqueeze(2).expand(-1, -1, 37) * linker_mask.unsqueeze(2)
-            output["mean_plddt"] = (plddt_expanded * output["atom37_atom_exists"]).sum(dim=(1, 2)) / (output["atom37_atom_exists"].sum(dim=(1, 2)) + 1e-8)
-            # output["chain_index"] = chain_index
+            samples = self.model.modality_decoder[0].get_decoder_outputs(s_s_0, s_z_0, batch)
+        else:
+            # Generate samples using the model
+            samples = self.model.generate_modality_only(
+                batch,
+                batch_size=batch_size,
+                modality_type=modality_type,
+                fixed_modality_shape=fixed_modality_shape,  #the real length of the generated sequence
+                modality_steps=modality_steps,
+                return_unprocessed_modalities=return_unprocessed_modalities
+            )
 
-            if as_protein:
-                return protein.output_to_protein({**output, **batch})
-            else:
-                return [{**output, **batch}]
-
-        if schedule is None:
-            schedule = np.array([1.0, 0.75, 0.5, 0.25, 0.1, 0]) 
-
-        outputs = []
-        prev_outputs = None
-        for t, s in zip(schedule[:-1], schedule[1:]):
-            s_s_0, s_z_0 = self.model.modality_encoder[0].get_encoder_outputs(batch, prev_outputs=prev_outputs)
-            output = self.model.modality_decoder[0].get_decoder_outputs(s_s_0, s_z_0, batch)
-            pseudo_beta = pseudo_beta_fn(batch['aatype'], output['final_atom_positions'], None)
-            outputs.append({**output, **batch})
-            noisy = rmsdalign(pseudo_beta, noisy)
-            noisy = (s / t) * noisy + (1 - s / t) * pseudo_beta
-            batch['noised_pseudo_beta_dists'] = torch.sum((noisy.unsqueeze(-2) - noisy.unsqueeze(-3)) ** 2, dim=-1)**0.5
-            batch['t'] = torch.ones(1, device=noisy.device) * s
-            output["atom37_atom_exists"] = output[
-                    "atom37_atom_exists"
-                ] * linker_mask.unsqueeze(2)
-            # Expand plddt to match atom37_atom_exists dimensions and apply linker mask
-            plddt_expanded = output["plddt"].unsqueeze(2).expand(-1, -1, 37) * linker_mask.unsqueeze(2)
-            output["mean_plddt"] = (plddt_expanded * output["atom37_atom_exists"]).sum(dim=(1, 2)) / (output["atom37_atom_exists"].sum(dim=(1, 2)) + 1e-8)
-            # output["chain_index"] = chain_index
-            if self_cond:
-                prev_outputs = output
-
-        del batch['noised_pseudo_beta_dists'], batch['t']
         if as_protein:
-            prots = []
-            for output in outputs:
-                prots.extend(protein.output_to_protein(output))
+            prots = protein.output_to_protein(samples)
             return prots
         else:
-            return outputs
+            return samples
         
     def _compute_validation_metrics(self, 
         batch, 
@@ -547,6 +591,7 @@ class ModelWrapper(pl.LightningModule):
             metrics["gdt_ha"] = gdt_ha_score
     
         return metrics
+
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(

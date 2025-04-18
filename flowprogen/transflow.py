@@ -1944,7 +1944,7 @@ class TransFlow(Module):
     @typecheck
     def forward_modality(
         self,
-        modalities: Float['b ...'],
+        modalities: Float['b ...'] | dict,
         times: Float['b'] | None = None,
         modality_type: int | None = None,
         encode_modality: bool = True,
@@ -2021,44 +2021,27 @@ class TransFlow(Module):
         mod = self.get_modality_info(modality_type)
 
         # maybe modality encode
+        tokens = None
+        if isinstance(modalities, dict):
+            if encode_modality and exists(mod.encoder):
+                with torch.no_grad():
+                    mod.encoder.eval()
+                    s_s_0, s_z_0 = mod.encoder.get_encoder_outputs(modalities, prev_outputs=None)
+                # shapes and device
+                N = s_z_0.shape[1]
+                s_s_i = s_s_0.unsqueeze(2).expand(-1, -1, N, -1)  # [1, 256, 256, 1024]
+                s_s_j = s_s_0.unsqueeze(1).expand(-1, N, -1, -1)  # [1, 256, 256, 1024]
+                ss_sz_concat = torch.cat([s_z_0, s_s_i, s_s_j], dim=-1) # [1, 256, 256, 128 + 1024 + 1024]
+                # where:
+                # s_z_0:     [B, N, N, 128]
+                # s_s_i:     [B, N, N, 1024]  ← from s_s_0.unsqueeze(2)
+                # s_s_j:     [B, N, N, 1024]  ← from s_s_0.unsqueeze(1)
 
+                modalities = ss_sz_concat
 
-        if encode_modality and exists(mod.encoder):
-            with torch.no_grad():
-                mod.encoder.eval()
-                mod.decoder.eval()
-                s_s_0, s_z_0 = mod.encoder.get_encoder_outputs(modalities, prev_outputs=None)
-                modalities = mod.decoder.get_decoder_outputs(s_s_0, s_z_0, modalities) # the output modalities here is structure
-                '''
-                modalities contain the following keys:
-                    'sm', 's_s', 's_z', 
-                    'distogram_logits', 
-                    'aatype', 
-                    'atom14_atom_exists', 
-                    'residx_atom14_to_atom37', 
-                    'residx_atom37_to_atom14', 
-                    'atom37_atom_exists', 
-                    'residue_index', 
-                    'lddt_logits', 
-                    'plddt', 
-                    'final_atom_positions', 
-                    'final_affine_tensor', 
-                    'name'
-                '''
-        # shapes and device
-        # tokens = modalities
-        # tokens = modalities['s_z']  # shape [1, 256, 256, 128]
-        s_s = modalities['s_s']  # shape [1, 256, 1024]
-        s_z = modalities['s_z']  # shape [1, 256, 256, 128]
-        s_s_i = s_s.unsqueeze(2).expand(-1, -1, 256, -1)  # [1, 256, 256, 1024]
-        s_s_j = s_s.unsqueeze(1).expand(-1, 256, -1, -1)  # [1, 256, 256, 1024]
-        s_z_enriched = torch.cat([s_z, s_s_i, s_s_j], dim=-1) # [1, 256, 256, 2176]
-
-        tokens = s_z_enriched
         
-        batch, device = tokens.shape[0], tokens.device
-        seq_length = modalities['aatype'].shape[1]
-
+        batch, device = modalities.shape[0], modalities.device
+        tokens = modalities
         # times
 
         if not exists(times):
@@ -2092,7 +2075,7 @@ class TransFlow(Module):
 
             _, *axial_dims, _ = noised_tokens.shape
 
-            assert len(axial_dims) == mod.num_dim, f'received modalities of ndim {len(axial_dims)} but expected {modality_num_dim}'
+            assert len(axial_dims) == mod.num_dim, f'received modalities of ndim {len(axial_dims)} but expected {mod.num_dim}'
 
         # maybe transform
 
@@ -2149,15 +2132,29 @@ class TransFlow(Module):
         if self.has_recon_loss:
             assert encode_modality
 
-            recon = noise + pred_flow * (1. - padded_times)
-
+            updated_noise = noise + pred_flow * (1. - padded_times)
+            s_s, s_z = self.split_noise(updated_noise)
             if exists(mod.decoder):
                 with torch.no_grad():
                     mod.decoder.eval()
-                    # recon = mod.decoder.get_decoder_outputs(recon)
-                    recon = mod.decoder.get_decoder_outputs(s_s_0, s_z_0, orig_modalities)
+                    recon = mod.decoder.get_decoder_outputs(s_s, s_z, orig_modalities)
                     '''
-                    dict_keys(['sm', 's_s', 's_z', 'distogram_logits', 'aatype', 'atom14_atom_exists', 'residx_atom14_to_atom37', 'residx_atom37_to_atom14', 'atom37_atom_exists', 'residue_index', 'lddt_logits', 'plddt', 'final_atom_positions', 'final_affine_tensor', 'name'])
+                    recon (structure) contain the following keys:
+                        'sm', 
+                        's_s', 
+                        's_z', 
+                        'distogram_logits', 
+                        'aatype', 
+                        'atom14_atom_exists', 
+                        'residx_atom14_to_atom37', 
+                        'residx_atom37_to_atom14', 
+                        'atom37_atom_exists', 
+                        'residue_index', 
+                        'lddt_logits', 
+                        'plddt', 
+                        'final_atom_positions', 
+                        'final_affine_tensor', 
+                        'name'
                     '''
 
             # recon_loss = F.mse_loss(
@@ -2178,12 +2175,35 @@ class TransFlow(Module):
 
         # return total_loss, (flow_loss, velocity_loss, recon_loss)
         return recon, (flow_loss, velocity_loss)
+    
+    def split_noise(self, noise: torch.Tensor):
+        """
+        保持顺序拆分 recon，还原 s_z_0 和 s_s_0
 
+        Args:
+            noise: Tensor of shape [B, N, N, 2176]
+
+        Returns:
+            s_s_0: Tensor of shape [B, N, 1024]
+            s_z_0: Tensor of shape [B, N, N, 128]
+        """
+        s_z_0, s_s_i, s_s_j = torch.split(noise, [128, 1024, 1024], dim=-1)
+
+        # s_s_0 是由 s_s_i 或 s_s_j 任意一方向 squeeze 回来的
+        # 注意：此处取 s_s_i 第三维的第0个，或者 s_s_j 的第二维第0个都可以
+        s_s_0_from_i = s_s_i[:, :, 0, :]
+        s_s_0_from_j = s_s_j[:, 0, :, :]
+
+        # assert torch.allclose(s_s_0_from_i, s_s_0_from_j), "s_s_i and s_s_j do not match!"
+
+        return s_s_0_from_i, s_z_0
+    
     @torch.no_grad()
     @eval_decorator
     @typecheck
     def generate_modality_only(
         self,
+        batch,
         batch_size: int = 1,
         modality_type: int | None = None,
         fixed_modality_shape: tuple[int, ...] | None = None,
@@ -2216,23 +2236,32 @@ class TransFlow(Module):
                 times = step_times,
                 modality_type = modality_type,
                 encode_modality = False,
-                return_loss = False
+                return_loss = False,
+                transformer=self.transformer
             )
 
             return flow
 
         times = torch.linspace(0., 1., modality_steps, device = device)
+        # Check if inputs are valid
+        assert noise is not None, "Input noise tensor is None"
+        assert times is not None, "Times tensor is None"
+        
+        # Verify odeint_fn is callable
+        assert callable(self.odeint_fn), f"odeint_fn should be callable but got {type(self.odeint_fn)}"
+        
+        # The issue might be in ode_step_fn, make sure it always returns a valid tensor
         trajectory = self.odeint_fn(ode_step_fn, noise, times)
 
         # add the sampled modality tokens
-
         sampled_modality = trajectory[-1]
-
+        sampled_modality_s_s, sampled_modality_s_z = self.split_noise(sampled_modality)
         # decode
 
+      
         if exists(mod.decoder):
             mod.decoder.eval()
-            sampled_modality = mod.decoder.get_decoder_outputs(sampled_modality)
+            sampled_modality = mod.decoder.get_decoder_outputs(sampled_modality_s_s, sampled_modality_s_z, batch)
 
         return sampled_modality
 
