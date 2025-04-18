@@ -2042,6 +2042,12 @@ class TransFlow(Module):
         
         batch, device = modalities.shape[0], modalities.device
         tokens = modalities
+        # Apply z_score normalization to tokens
+        if tokens is not None:
+            mean = torch.mean(tokens, dim=-1, keepdim=True)
+            std = torch.std(tokens, dim=-1, keepdim=True) + 1e-8  # Add small epsilon to avoid division by zero
+            tokens = (tokens - mean) / std
+        
         # times
 
         if not exists(times):
@@ -2065,9 +2071,10 @@ class TransFlow(Module):
             noised_tokens = tokens
 
         # from latent to model tokens
-        # before this, noised_tokens is torch.Size([1, 256, 256, 128])
+        # before this, noised_tokens is torch.Size([1, 256, 256, 2176])
+
         noised_tokens = mod.latent_to_model(noised_tokens)
-        # after this, noised_tokens is torch.Size([1, 256, 256, 256])
+        # after this, noised_tokens is torch.Size([1, 256, 256, 128])
         # axial positions
 
         if mod.add_pos_emb:
