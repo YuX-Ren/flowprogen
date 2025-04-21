@@ -157,11 +157,12 @@ class ModelWrapper(pl.LightningModule):
         if self.args.distillation:
             return self.distillation_training_step(batch)
         
-        if torch.rand(1, generator=self.generator).item() < self.args.noise_prob:
-            self._add_noise(batch)
-            self.log(f'{self.stage}/time', float(batch['t'].mean().item()))
-        else:
-            self.log(f'{self.stage}/time', float(1.0))
+        # we add noise in transflow
+        # if torch.rand(1, generator=self.generator).item() < self.args.noise_prob:
+        #     self._add_noise(batch)
+        #     self.log(f'{self.stage}/time', float(batch['t'].mean().item()))
+        # else:
+        #     self.log(f'{self.stage}/time', float(1.0))
         
         if self.args.extra_input:
             if torch.rand(1, generator=self.generator).item() < self.args.extra_input_prob:
@@ -665,7 +666,7 @@ class TransFlowWrapper(ModelWrapper):
             self.cached_weights = None
 
         # self.harmonic_prior = HarmonicPrior(config.data.train.crop_size)
-        self.gaussian_prior = GaussianPrior(config.data.train.crop_size)
+        self.gaussian_prior = GaussianPrior(config.data.train.crop_size, dim=2176)
         self.generator = torch.Generator().manual_seed(137)
         self.last_log_time = time.time()
         self.iter_step = 0
@@ -701,7 +702,7 @@ class LLMFlowWrapper(ModelWrapper):
             add_pos_emb = True,  # Important for sequence data
             modality_num_dim = 2,
             fallback_to_default_shape_if_invalid = True,
-            reconstruction_loss_weight = 1.0,
+            reconstruction_loss_weight = 0, # 0 = no reconstruction loss
             transformer={
                 'use_llama': True,
                 'dim': 2048,

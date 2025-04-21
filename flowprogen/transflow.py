@@ -50,7 +50,7 @@ from tqdm import tqdm
 from loguru import logger
 from openfold.utils.exponential_moving_average import ExponentialMovingAverage
 pad_sequence = partial(pad_sequence, batch_first = True)
-
+from flowprogen.utils.diffusion import GaussianPrior
 # tensor typing
 
 import jaxtyping
@@ -2053,7 +2053,7 @@ class TransFlow(Module):
         if not exists(times):
             times = torch.rand((batch,), device = device)
 
-        if return_loss:
+        if return_loss: # add noise to tokens
 
             if requires_velocity_consistency:
                 orig_times = times.clone()
@@ -2061,7 +2061,10 @@ class TransFlow(Module):
 
             padded_times = append_dims(times, tokens.ndim - 1)
 
-            noise = torch.randn_like(tokens)
+            # noise = torch.randn_like(tokens)
+            prior = GaussianPrior(N=256, dim=2176)
+            prior.to(device)
+            noise = prior.sample(batch_dims=(batch,))
 
             noised_tokens = padded_times * tokens + (1. - padded_times) * noise
 

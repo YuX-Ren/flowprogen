@@ -58,7 +58,7 @@ class HarmonicPrior:
         return self.P @ (torch.sqrt(self.D_inv)[:,None] * torch.randn(*batch_dims, self.N, 3, device=self.P.device))
     
 class GaussianPrior:
-    def __init__(self, N=256, sigma=1.0):
+    def __init__(self, N=256, sigma=1.0, dim=3):
         """
         Initialize a Gaussian prior distribution.
         
@@ -70,6 +70,7 @@ class GaussianPrior:
         self.sigma = sigma
         self.mean = torch.zeros(1) 
         self.std = torch.ones(1) 
+        self.dim = dim
         
     def to(self, device):
         """
@@ -91,7 +92,7 @@ class GaussianPrior:
         Returns:
             torch.Tensor: Samples from the Gaussian distribution with shape (*batch_dims, N, 3)
         """
-        return self.sigma * torch.randn(*batch_dims, self.N, 3, device=self.mean.device if self.mean is not None else 'cpu')
+        return self.sigma * torch.randn(*batch_dims, self.N, self.N, self.dim, device=self.mean.device if self.mean is not None else 'cpu')
     
     def set_mean_std(self, mean, std):
         """
