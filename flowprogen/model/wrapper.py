@@ -187,22 +187,26 @@ class ModelWrapper(pl.LightningModule):
         
         if isinstance(result, tuple) and len(result) == 2:
             outputs, (flow_loss, velocity_loss) = result
-            loss, loss_breakdown = self.loss(outputs, batch, _return_breakdown=True)
-            
-            with torch.no_grad():
-                metrics = self._compute_validation_metrics(batch, outputs, superimposition_metrics=False)
+            if outputs:
+                loss, loss_breakdown = self.loss(outputs, batch, _return_breakdown=True)
+                with torch.no_grad():
+                    metrics = self._compute_validation_metrics(batch, outputs, superimposition_metrics=False)
 
-            # added by hwxiao, use default log()
-            for k, v in loss_breakdown.items():
-                self.log(f'{self.stage}/'+k, v.item(), prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
+                # added by hwxiao, use default log()
+                for k, v in loss_breakdown.items():
+                    self.log(f'{self.stage}/'+k, v.item(), prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
+                for k, v in metrics.items():
+                    self.log(f'{self.stage}/'+k, v.item(), prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
+
             self.log(f'{self.stage}/flow_loss', flow_loss.item(), prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
             self.log(f'{self.stage}/velocity_loss', velocity_loss.item(), prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
-            for k, v in metrics.items():
-                self.log(f'{self.stage}/'+k, v.item(), prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
         
             self.log(f'{self.stage}/dur', time.time() - self.last_log_time, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
             self.last_log_time = time.time()
-            total_loss = loss + flow_loss + velocity_loss
+            if outputs:
+                total_loss = loss + flow_loss + velocity_loss
+            else:
+                total_loss = flow_loss
             return total_loss
 
     def validation_step(self, batch, batch_idx):
@@ -635,7 +639,7 @@ class TransFlowWrapper(ModelWrapper):
             add_pos_emb = True,
             modality_num_dim = 2, # corresponds to modality_default_shape
             fallback_to_default_shape_if_invalid = True,
-            reconstruction_loss_weight = 1.0,
+            reconstruction_loss_weight = 0, # 0 = no reconstruction loss
             transformer = dict(
                 dim = 128,
                 depth = 4,

@@ -2135,7 +2135,7 @@ class TransFlow(Module):
         # maybe recon loss
 
         recon_loss = self.zero
-
+        recon = None
         if self.has_recon_loss:
             assert encode_modality
 
@@ -2151,7 +2151,7 @@ class TransFlow(Module):
                         's_s', 
                         's_z', 
                         'distogram_logits', 
-                        'aatype', 
+                        'aatype',
                         'atom14_atom_exists', 
                         'residx_atom14_to_atom37', 
                         'residx_atom37_to_atom14', 
@@ -2164,6 +2164,7 @@ class TransFlow(Module):
                         'name'
                     '''
 
+        velocity_loss = velocity_loss * self.velocity_consistency_loss_weight 
             # recon_loss = F.mse_loss(
             #     recon['final_atom_positions'],
             #     orig_modalities['all_atom_positions']
@@ -2179,7 +2180,6 @@ class TransFlow(Module):
 
         # if not return_loss_breakdown:
         #     return total_loss
-
         # return total_loss, (flow_loss, velocity_loss, recon_loss)
         return recon, (flow_loss, velocity_loss)
     

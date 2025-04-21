@@ -169,6 +169,10 @@ def main(args):
         model = TransFlowWrapper(config, args)
     elif args.mode == 'llmflow':
         model = LLMFlowWrapper(config, args)
+    for name, param in model.named_parameters():
+        param.requires_grad = False
+        if 'transformer' in name:
+            param.requires_grad = True
 
     # total_params = 0
     # trainable_params = 0
@@ -183,7 +187,7 @@ def main(args):
     #         transformer_total_params += numel
     #         if param.requires_grad:
     #             transformer_trainable_params += numel
-    # print(f"transformer params: {transformer_trainable_params / 1e6}M, transformer total params: {transformer_total_params / 1e6}M")
+    # print(f"transformer trainable params: {transformer_trainable_params / 1e6}M, transformer total params: {transformer_total_params / 1e6}M")
     # print(f"Trainable params: {trainable_params / 1e6}M, Total params: {total_params / 1e6}M")
 
     if args.restore_weights_only:
