@@ -231,9 +231,9 @@ class ModelWrapper(pl.LightningModule):
         for _ in range(self.args.val_samples):
             if self.args.distillation:
                 # prots = self.inference(batch, no_diffusion=True, noisy_first=True, as_protein=True)
-                prots = self.inference(batch, as_protein=True, fixed_modality_shape=(len(ref_prot.seqres), len(ref_prot.seqres)), modality_steps=1, no_flow=True)
+                prots = self.inference(batch, as_protein=True, fixed_modality_shape=(len(ref_prot.seqres),), modality_steps=1, no_flow=True)
             else:
-                prots = self.inference(batch, as_protein=True, fixed_modality_shape=(len(ref_prot.seqres), len(ref_prot.seqres)), modality_steps=1)
+                prots = self.inference(batch, as_protein=True, fixed_modality_shape=(len(ref_prot.seqres),), modality_steps=1)
             pred_prots.append(prots[-1])
 
         first_metrics = protein.global_metrics(ref_prot, prots[0])
@@ -524,8 +524,8 @@ class ModelWrapper(pl.LightningModule):
             Generated modality samples
         """
         if no_flow:
-            s_s_0, s_z_0 = self.model.modality_encoder[0].get_encoder_outputs(batch)
-            samples = self.model.modality_decoder[0].get_decoder_outputs(s_s_0, s_z_0, batch)
+            s_s_0 = self.model.modality_encoder[0].get_encoder_outputs(batch)
+            samples = self.model.modality_decoder[0].get_decoder_outputs(s_s_0, batch)
         else:
             # Generate samples using the model
             samples = self.model.generate_modality_only(
@@ -632,13 +632,13 @@ class TransFlowWrapper(ModelWrapper):
         
         self.model = TransFlow(
             num_text_tokens = 21,  # Number of amino acids
-            dim_latent = 2176,
+            dim_latent = 64,
             channel_first_latent = False,  # Protein data is not channel-first
-            modality_default_shape = (256, 256),  # Maximum sequence length
+            modality_default_shape = (256,),  # Maximum sequence length
             modality_encoder = esm_model,
             modality_decoder = esm_model,
             add_pos_emb = True,
-            modality_num_dim = 2, # corresponds to modality_default_shape
+            modality_num_dim = 1, # corresponds to modality_default_shape
             fallback_to_default_shape_if_invalid = True,
             reconstruction_loss_weight = 0, # 0 = no reconstruction loss
             transformer = dict(

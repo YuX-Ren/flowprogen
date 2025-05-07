@@ -11,6 +11,9 @@ from torch.nn import LayerNorm
 import esm
 from esm.data import Alphabet
 
+# CHEAP_Protein
+# from cheap.pretrained import CHEAP_shorten_1_dim_64
+
 from flowprogen.utils.logging import get_logger
 logger = get_logger(__name__)
 from flowprogen.utils.misc import (
@@ -122,6 +125,8 @@ class ESMFold(nn.Module):
             c_in=cfg.trunk.structure_module.c_s,
             c_hidden=cfg.lddt_head_hid_dim
         )
+
+        # self.encoder_cheap = CHEAP_shorten_1_dim_64()
 
     @staticmethod
     def _af2_to_esm(d: Alphabet):
@@ -437,11 +442,22 @@ class ESMFold(nn.Module):
     def device(self):
         return self.esm_s_combine.device
 
+    @torch.no_grad()
+    def get_encoder_cheap_outputs(self, batch, prev_outputs=None):
+        mask = batch['seq_mask']
+        sequences = batch['seqres']
+        cheap_outputs, _ = self.encoder_cheap(sequences)
+        return cheap_outputs
+
+    # def get_decoder_cheap_outputs(self, batch, prev_outputs=None):
+
+        # return cheap_outputs
+
     def get_encoder_outputs(self, batch, prev_outputs=None):
         aa = batch['aatype']
         mask = batch['seq_mask']
         residx = batch['residue_index']
-        
+        B, L = aa.shape
         # ESM语言模型部分
         esmaa = self._af2_idx_to_esm_idx(aa, mask)
         esm_s, esm_z = self._compute_language_model_representations(esmaa)
@@ -453,42 +469,8 @@ class ESMFold(nn.Module):
         s_s_0 = self.esm_s_mlp(esm_s)
         s_s_0 += self.embedding(aa)
         
-        # 配对特征处理
-        if 'noised_pseudo_beta_dists' in batch:
-            inp_z = self._get_input_pair_embeddings(
-                batch['noised_pseudo_beta_dists'], 
-                batch['pseudo_beta_mask']
-            )
-            inp_z = inp_z + self.input_time_embedding(self.input_time_projection(batch['t']))[:,None,None]
-        else:
-            B, L = batch['aatype'].shape
-            inp_z = self._get_input_pair_embeddings(
-                s_s_0.new_zeros(B, L, L), 
-                batch['pseudo_beta_mask'] * 0.0
-            )
-            inp_z = inp_z + self.input_time_embedding(self.input_time_projection(inp_z.new_zeros(B)))[:,None,None]
-        ##########################
-        #############################
-        if self.extra_input:
-            if 'extra_all_atom_positions' in batch:
-                extra_pseudo_beta = pseudo_beta_fn(batch['aatype'], batch['extra_all_atom_positions'], None)
-                extra_pseudo_beta_dists = torch.sum((extra_pseudo_beta.unsqueeze(-2) - extra_pseudo_beta.unsqueeze(-3)) ** 2, dim=-1)**0.5
-                extra_inp_z = self._get_extra_input_pair_embeddings(
-                    extra_pseudo_beta_dists, 
-                    batch['pseudo_beta_mask'],
-                )
-                
-            else: # otherwise DDP complains
-                B, L = batch['aatype'].shape
-                extra_inp_z = self._get_extra_input_pair_embeddings(
-                    inp_z.new_zeros(B, L, L), 
-                    inp_z.new_zeros(B, L),
-                ) * 0.0
-    
-            inp_z = inp_z + extra_inp_z
         ########################
-
-        s_z_0 = inp_z
+        s_z_0 = s_s_0.new_zeros(B, L, L, self.cfg.trunk.pairwise_state_dim)
         if prev_outputs is not None:
             s_s_0 = s_s_0 + self.trunk.recycle_s_norm(prev_outputs['s_s'])
             s_z_0 = s_z_0 + self.trunk.recycle_z_norm(prev_outputs['s_z'])
@@ -506,7 +488,10 @@ class ESMFold(nn.Module):
         
         return s_s_0, s_z_0
 
-    def get_decoder_outputs(self, s_s_0, s_z_0, batch):
+    def get_decoder_outputs(self, s_s_0, batch):
+        aa = batch['aatype']
+        B, L = aa.shape 
+        s_z_0 = s_s_0.new_zeros(B, L, L, self.cfg.trunk.pairwise_state_dim)
         aa = batch['aatype']
         mask = batch['seq_mask']
         residx = batch['residue_index']

@@ -58,6 +58,10 @@ from jaxtyping import jaxtyped
 from beartype import beartype
 from beartype.door import is_bearable
 
+# for cheap
+from cheap.pretrained import CHEAP_shorten_1_dim_64
+
+
 class TorchTyping:
     def __init__(self, abstract_dtype):
         self.abstract_dtype = abstract_dtype
@@ -1479,7 +1483,8 @@ class TransFlow(Module):
         # dummy loss
 
         self.register_buffer('zero', tensor(0.), persistent = False)
-
+        # for cheap
+        self.encoder_cheap = CHEAP_shorten_1_dim_64()
     @property
     def device(self):
         return next(self.parameters()).device
@@ -2025,30 +2030,21 @@ class TransFlow(Module):
         if isinstance(modalities, dict):
             if encode_modality and exists(mod.encoder):
                 with torch.no_grad():
-                    mod.encoder.eval()
-                    s_s_0, s_z_0 = mod.encoder.get_encoder_outputs(modalities, prev_outputs=None)
-                # shapes and device
-                N = s_z_0.shape[1]
-                s_s_i = s_s_0.unsqueeze(2).expand(-1, -1, N, -1)  # [1, 256, 256, 1024]
-                s_s_j = s_s_0.unsqueeze(1).expand(-1, N, -1, -1)  # [1, 256, 256, 1024]
-                ss_sz_concat = torch.cat([s_z_0, s_s_i, s_s_j], dim=-1) # [1, 256, 256, 128 + 1024 + 1024]
-                # where:
-                # s_z_0:     [B, N, N, 128]
-                # s_s_i:     [B, N, N, 1024]  ← from s_s_0.unsqueeze(2)
-                # s_s_j:     [B, N, N, 1024]  ← from s_s_0.unsqueeze(1)
-
-                modalities = ss_sz_concat
-
+                    # mod.encoder.eval()
+                    # s_s_0, s_z_0 = mod.encoder.get_encoder_cheap_outputs(modalities, prev_outputs=None)
+                    s_s_0, _ = self.encoder_cheap(modalities['seqres'])
+                    # modalities = s_s_0.clone()
+                    # print(modalities.shape)
+                    # s_s_0 = torch.randn(1, 256, 64).to(self.device) * 0
+                # pad and truncate to modality_default_shape
+                # truncate to 256
+                modalities = s_s_0[:, :256, :] * 0
+                # pad to 256
+                modalities = F.pad(modalities, (0, 0, 0, 256 - modalities.shape[1]))
+                modalities = modalities.requires_grad_(False)
         
         batch, device = modalities.shape[0], modalities.device
         tokens = modalities
-        # Apply z_score normalization to tokens
-        if tokens is not None:
-            mean = torch.mean(tokens, dim=-1, keepdim=True)
-            std = torch.std(tokens, dim=-1, keepdim=True) + 1e-8  # Add small epsilon to avoid division by zero
-            tokens = (tokens - mean) / std
-        
-        # times
 
         if not exists(times):
             times = torch.rand((batch,), device = device)
@@ -2062,9 +2058,10 @@ class TransFlow(Module):
             padded_times = append_dims(times, tokens.ndim - 1)
 
             # noise = torch.randn_like(tokens)
-            prior = GaussianPrior(N=256, dim=2176)
-            prior.to(device)
-            noise = prior.sample(batch_dims=(batch,))
+            # prior = GaussianPrior(N=256, dim=64)
+            # prior.to(device)
+            # noise = prior.sample(batch_dims=(batch,))
+            noise = torch.randn_like(tokens).to(device)
 
             noised_tokens = padded_times * tokens + (1. - padded_times) * noise
 
@@ -2103,6 +2100,7 @@ class TransFlow(Module):
             noised_tokens,
             times = times,
             modality_only = True,
+            # attn_mask = attn_mask
         )
 
         embed = inverse_pack_axial_dims(embed)
@@ -2143,11 +2141,11 @@ class TransFlow(Module):
             assert encode_modality
 
             updated_noise = noise + pred_flow * (1. - padded_times)
-            s_s, s_z = self.split_noise(updated_noise)
+            # s_s = self.split_noise(updated_noise)
             if exists(mod.decoder):
                 with torch.no_grad():
                     mod.decoder.eval()
-                    recon = mod.decoder.get_decoder_outputs(s_s, s_z, orig_modalities)
+                    recon = mod.decoder.get_decoder_outputs(s_s, orig_modalities)
                     '''
                     recon (structure) contain the following keys:
                         'sm', 
@@ -2265,13 +2263,12 @@ class TransFlow(Module):
 
         # add the sampled modality tokens
         sampled_modality = trajectory[-1]
-        sampled_modality_s_s, sampled_modality_s_z = self.split_noise(sampled_modality)
         # decode
 
       
         if exists(mod.decoder):
             mod.decoder.eval()
-            sampled_modality = mod.decoder.get_decoder_outputs(sampled_modality_s_s, sampled_modality_s_z, batch)
+            sampled_modality = mod.decoder.get_decoder_outputs(sampled_modality, batch)
 
         return sampled_modality
 

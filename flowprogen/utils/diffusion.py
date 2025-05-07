@@ -92,7 +92,7 @@ class GaussianPrior:
         Returns:
             torch.Tensor: Samples from the Gaussian distribution with shape (*batch_dims, N, 3)
         """
-        return self.sigma * torch.randn(*batch_dims, self.N, self.N, self.dim, device=self.mean.device if self.mean is not None else 'cpu')
+        return self.sigma * torch.randn(*batch_dims, self.N, self.dim, device=self.mean.device if self.mean is not None else 'cpu')
     
     def set_mean_std(self, mean, std):
         """
