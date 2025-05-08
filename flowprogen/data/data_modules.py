@@ -312,7 +312,8 @@ class OpenFoldDataset(torch.utils.data.Dataset):
             self.reroll()
 
     def __getitem__(self, idx):
-        dataset_idx, datapoint_idx = self.datapoints[idx]
+        # dataset_idx, datapoint_idx = self.datapoints[idx]
+        dataset_idx, datapoint_idx = self.datapoints[0]
         # print(f"dataset_idx: {dataset_idx}, datapoint_idx: {datapoint_idx}")
         return self.datasets[dataset_idx][datapoint_idx]
 

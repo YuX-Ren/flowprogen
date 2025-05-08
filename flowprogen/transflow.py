@@ -1497,8 +1497,8 @@ class TransFlow(Module):
 
         modality_type = default(modality_type, 0)
 
-        modality_encoder = self.modality_encoder[modality_type]
-        modality_decoder = self.modality_decoder[modality_type]
+        # modality_encoder = self.modality_encoder[modality_type]
+        # modality_decoder = self.modality_decoder[modality_type]
         latent_to_model = self.latent_to_model_projs[modality_type]
         model_to_latent = self.model_to_latent_projs[modality_type]
 
@@ -1518,8 +1518,10 @@ class TransFlow(Module):
         channel_first_latent = self.channel_first_latent[modality_type]
 
         return ModalityInfo(
-            encoder = modality_encoder,
-            decoder = modality_decoder,
+            # encoder = modality_encoder,
+            # decoder = modality_decoder,
+            encoder = None,
+            decoder = None,
             latent_to_model = latent_to_model,
             model_to_latent = model_to_latent,
             add_pos_emb = add_pos_emb,
@@ -2017,7 +2019,6 @@ class TransFlow(Module):
             modalities = modalities.to(self.device)
         
         orig_modalities = modalities
-
         if self.num_modalities > 1:
             assert exists(modality_type), '`modality_type` must be explicitly passed in on forward when training on greater than 1 modality'
 
@@ -2028,24 +2029,22 @@ class TransFlow(Module):
         # maybe modality encode
         tokens = None
         if isinstance(modalities, dict):
-            if encode_modality and exists(mod.encoder):
-                with torch.no_grad():
-                    # mod.encoder.eval()
-                    # s_s_0, s_z_0 = mod.encoder.get_encoder_cheap_outputs(modalities, prev_outputs=None)
-                    s_s_0, _ = self.encoder_cheap(modalities['seqres'])
-                    # modalities = s_s_0.clone()
-                    # print(modalities.shape)
-                    # s_s_0 = torch.randn(1, 256, 64).to(self.device) * 0
+            with torch.no_grad():
+                modalities, _ = self.encoder_cheap(modalities['seqres'])
                 # pad and truncate to modality_default_shape
                 # truncate to 256
-                modalities = s_s_0[:, :256, :] * 0
+                modalities = modalities[:, :256, :] 
                 # pad to 256
+                mask = torch.ones_like(modalities)
+                mask = F.pad(mask, (0, 0, 0, 256 - modalities.shape[1]))
+                # Modality tokens (mask[b, j] = 1) can attend to other modality tokens (mask[b, k] = 1)
+                attn_mask = mask.unsqueeze(1) * mask.unsqueeze(2)  # [b, 1, 256] * [b, 256, 1] -> [b, 256, 256]
+                # Convert to boolean
+                attn_mask = attn_mask.bool()
                 modalities = F.pad(modalities, (0, 0, 0, 256 - modalities.shape[1]))
-                modalities = modalities.requires_grad_(False)
-        
+
         batch, device = modalities.shape[0], modalities.device
         tokens = modalities
-
         if not exists(times):
             times = torch.rand((batch,), device = device)
 
@@ -2054,25 +2053,16 @@ class TransFlow(Module):
             if requires_velocity_consistency:
                 orig_times = times.clone()
                 times = times * (1. - velocity_consistency_delta_time) # make sure times are max of 1. - small delta, for velocity consistency
-
             padded_times = append_dims(times, tokens.ndim - 1)
-
-            # noise = torch.randn_like(tokens)
-            # prior = GaussianPrior(N=256, dim=64)
-            # prior.to(device)
-            # noise = prior.sample(batch_dims=(batch,))
             noise = torch.randn_like(tokens).to(device)
-
-            noised_tokens = padded_times * tokens + (1. - padded_times) * noise
-
-            flow = tokens - noise
-
+            # noised_tokens = padded_times * tokens + (1. - padded_times) * noise
+            # flow = tokens - noise
+            noised_tokens = tokens
+            flow = tokens
         else:
             noised_tokens = tokens
-
         # from latent to model tokens
         # before this, noised_tokens is torch.Size([1, 256, 256, 2176])
-
         noised_tokens = mod.latent_to_model(noised_tokens)
         # after this, noised_tokens is torch.Size([1, 256, 256, 128])
         # axial positions
@@ -2086,8 +2076,7 @@ class TransFlow(Module):
 
         # maybe transform
 
-        noised_tokens, inverse_pack_axial_dims = pack_one_with_inverse(noised_tokens, 'b * d')
-        # after this, noised_tokens is torch.Size([1, 65536, 256])
+        # noised_tokens, inverse_pack_axial_dims = pack_one_with_inverse(noised_tokens, 'b * d')
         # maybe add axial pos emb
 
         if mod.add_pos_emb:
@@ -2100,10 +2089,10 @@ class TransFlow(Module):
             noised_tokens,
             times = times,
             modality_only = True,
-            # attn_mask = attn_mask
+            attn_mask = mask
         )
 
-        embed = inverse_pack_axial_dims(embed)
+        # embed = inverse_pack_axial_dims(embed)
 
         pred_flow = mod.model_to_latent(embed)
 
@@ -2166,22 +2155,7 @@ class TransFlow(Module):
                     '''
 
         velocity_loss = velocity_loss * self.velocity_consistency_loss_weight 
-            # recon_loss = F.mse_loss(
-            #     recon['final_atom_positions'],
-            #     orig_modalities['all_atom_positions']
-            # )
 
-        # total loss
-
-        # total_loss = (
-        #     flow_loss +
-        #     velocity_loss * self.velocity_consistency_loss_weight +
-        #     recon_loss * self.reconstruction_loss_weight
-        # )
-
-        # if not return_loss_breakdown:
-        #     return total_loss
-        # return total_loss, (flow_loss, velocity_loss, recon_loss)
         return recon, (flow_loss, velocity_loss)
     
     def split_noise(self, noise: torch.Tensor):
@@ -2238,7 +2212,6 @@ class TransFlow(Module):
         def ode_step_fn(step_times, denoised):
 
             step_times = repeat(step_times, ' -> b', b = batch_size)
-
             flow = self.forward_modality(
                 denoised,
                 times = step_times,
@@ -2336,7 +2309,6 @@ class TransFlow(Module):
                 modality_type = modality_type,
                 velocity_consistency_ema_model = velocity_consistency_ema_model
             )
-
             return self.forward_modality(modalities, **forward_modality_kwargs)
 
         batch = len(modalities)
