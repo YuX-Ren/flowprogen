@@ -6,12 +6,13 @@
 
 gpu_count=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
 
-torchrun --nproc_per_node=$gpu_count train.py \
+TORCH_COMPILE=0 torchrun --nproc_per_node=$gpu_count train.py \
+    --val_freq 1000 \
     --lr 5e-4 \
     --noise_prob 0.8 \
     --accumulate_grad 8 \
-    --epochs 13 \
-    --train_epoch_len 10000 \
+    --epochs 10000 \
+    --train_epoch_len 1000 \
     --train_cutoff 2020-05-01 \
     --filter_chains \
     --train_data_dir /share/project/xiaohongwang/Datasets/pdb_mmcif_data_npz \
@@ -24,4 +25,5 @@ torchrun --nproc_per_node=$gpu_count train.py \
     --mode transflow \
     --run_name transflow_esmfold \
     --print_freq 1000 \
-    --wandb
+    --wandb \
+    --no_ema

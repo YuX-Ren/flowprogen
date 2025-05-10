@@ -142,9 +142,9 @@ class ModelWrapper(pl.LightningModule):
         
     def training_step(self, batch, batch_idx, stage='train'):
         self.iter_step += 1
-        device = batch["aatype"].device
-        batch_size = batch['aatype'].shape[0]
-        self.gaussian_prior.to(device)
+        # device = batch["aatype"].device
+        device = batch['mask'].device
+        batch_size = batch['mask'].shape[0]
         self.stage = stage
         
         if not self.args.no_ema:
@@ -517,7 +517,7 @@ class TransFlowWrapper(ModelWrapper):
         esm_model = None
         self.model = TransFlow(
             num_text_tokens = 21,  # Number of amino acids
-            dim_latent = 64,
+            dim_latent = 32,
             channel_first_latent = False,  # Protein data is not channel-first
             modality_default_shape = (256,),  # Maximum sequence length
             modality_encoder = esm_model,
@@ -527,10 +527,10 @@ class TransFlowWrapper(ModelWrapper):
             fallback_to_default_shape_if_invalid = True,
             reconstruction_loss_weight = 0, # 0 = no reconstruction loss
             transformer = dict(
-                dim = 1024,
+                dim = 456,
                 depth = 12,
                 dim_head = 32,
-                heads = 4,
+                heads = 6,
                 attn_laser = True,
                 use_flex_attn = True,
                 use_gradient_checkpointing = True,

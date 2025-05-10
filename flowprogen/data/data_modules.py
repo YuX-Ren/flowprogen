@@ -30,7 +30,7 @@ import torch
 
 from openfold.data import mmcif_parsing
 from flowprogen.data import data_pipeline, feature_pipeline
-from flowprogen.utils.tensor_utils import tensor_tree_map, dict_multimap
+from flowprogen.utils.tensor_utils import tensor_tree_map, dict_multimap, dict_multimap_with_padding, dict_multimap_with_padding_buggy
 
 
 class OpenFoldSingleDataset(torch.utils.data.Dataset):
@@ -171,19 +171,20 @@ class OpenFoldSingleDataset(torch.utils.data.Dataset):
             path = f"{self.data_dir}/{name[1:3]}/{name}.npz"
             mmcif_feats = dict(np.load(path, allow_pickle=True))
 
-        if self.first_as_template:
-            extra_all_atom_positions = mmcif_feats['all_atom_positions'][0]
-            mmcif_feats['extra_all_atom_positions'] = extra_all_atom_positions
+        # if self.first_as_template:
+        #     extra_all_atom_positions = mmcif_feats['all_atom_positions'][0]
+        #     mmcif_feats['extra_all_atom_positions'] = extra_all_atom_positions
         
-        if self.subsample_pos:
-            N = mmcif_feats['all_atom_positions'].shape[0]
-            conf_idx = np.random.randint(0, N)
-            mmcif_feats['all_atom_positions'] = mmcif_feats['all_atom_positions'][conf_idx]
-        elif self.num_confs:
-            mmcif_feats['all_atom_positions'] = mmcif_feats['all_atom_positions'][conf_idx]
+        # if self.subsample_pos:
+        #     N = mmcif_feats['all_atom_positions'].shape[0]
+        #     conf_idx = np.random.randint(0, N)
+        #     mmcif_feats['all_atom_positions'] = mmcif_feats['all_atom_positions'][conf_idx]
+        # elif self.num_confs:
+        #     mmcif_feats['all_atom_positions'] = mmcif_feats['all_atom_positions'][conf_idx]
         
-        msa_features = self.data_pipeline._process_msa_feats(f'{self.alignment_dir}/{item.msa_id}', item.seqres, alignment_index=None)
-        data = {**mmcif_feats, **msa_features}
+        # msa_features = self.data_pipeline._process_msa_feats(f'{self.alignment_dir}/{item.msa_id}', item.seqres, alignment_index=None)
+        # data = {**mmcif_feats, **msa_features}
+        data = mmcif_feats
         if(self._output_raw):
             return data
         feats = self.feature_pipeline.process_features(data, self.mode) 
@@ -197,6 +198,19 @@ class OpenFoldSingleDataset(torch.utils.data.Dataset):
         else:
             return len(self.pdb_chains) 
 
+
+class SequenceSingleDataset_v2(OpenFoldSingleDataset):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        data = torch.load(self.data_dir + '/data.pt', map_location='cpu')
+        self.data = data
+
+    def __getitem__(self, idx):
+        data_point = self.data[idx]
+        return data_point
+
+    def __len__(self):
+        return len(self.data)
 
 def deterministic_train_filter(
     chain_data_cache_entry: Any,
@@ -312,8 +326,8 @@ class OpenFoldDataset(torch.utils.data.Dataset):
             self.reroll()
 
     def __getitem__(self, idx):
-        # dataset_idx, datapoint_idx = self.datapoints[idx]
-        dataset_idx, datapoint_idx = self.datapoints[0]
+        dataset_idx, datapoint_idx = self.datapoints[idx]
+        # dataset_idx, datapoint_idx = self.datapoints[0]
         # print(f"dataset_idx: {dataset_idx}, datapoint_idx: {datapoint_idx}")
         return self.datasets[dataset_idx][datapoint_idx]
 
@@ -338,7 +352,7 @@ class OpenFoldDataset(torch.utils.data.Dataset):
 class OpenFoldBatchCollator:
     def __call__(self, prots):
         stack_fn = lambda x: torch.stack(x, dim=0) if isinstance(x[0], torch.Tensor) else x
-        return dict_multimap(stack_fn, prots) 
+        return dict_multimap_with_padding_buggy(stack_fn, prots) 
 
 
 def collate_fn(data_list):

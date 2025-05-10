@@ -68,6 +68,47 @@ def dict_multimap(fn, dicts):
 
     return new_dict
 
+import torch.nn.functional as F
+def dict_multimap_with_padding(fn, dicts):
+    first = dicts[0]
+    new_dict = {}
+    for k, v in first.items():
+
+        all_v = [F.pad(d[k], (0, 0, 0, 256 - d[k].shape[-2])).squeeze(0) if isinstance(d[k], torch.Tensor) else d[k] for d in dicts]
+        if type(v) is dict:
+            new_dict[k] = dict_multimap_with_padding(fn, all_v)
+        else:
+            new_dict[k] = fn(all_v)
+
+    return new_dict
+
+
+def dict_multimap_with_padding_buggy(fn, dicts):
+    first = dicts[0]
+    new_dict = {}
+    for k, v in first.items():
+        if k == 'mask':
+            continue
+        if k == 'emb':
+            all_v = []
+            masks = []
+            for d in dicts:
+                if isinstance(d[k], torch.Tensor):
+                    mask = torch.zeros(256,1)
+                    mask[:d[k].shape[-2]] = 1
+                    masks.append(mask)
+                    all_v.append(F.pad(d[k], (0, 0, 0, 256 - d[k].shape[-2])).squeeze(0))
+                else:
+                    all_v.append(d[k])
+            all_v = torch.stack(all_v, dim=0)
+            masks = torch.stack(masks, dim=0)
+            new_dict[k] = all_v
+            new_dict['mask'] = masks
+        else:
+            all_v = [d[k] for d in dicts]
+
+    return new_dict
+
 
 def one_hot(x, v_bins):
     reshaped_bins = v_bins.view(((1,) * len(x.shape)) + (len(v_bins),))

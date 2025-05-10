@@ -59,8 +59,8 @@ from beartype import beartype
 from beartype.door import is_bearable
 
 # for cheap
-from cheap.pretrained import CHEAP_shorten_1_dim_64
-
+# from cheap.pretrained import CHEAP_shorten_1_dim_64
+import random
 
 class TorchTyping:
     def __init__(self, abstract_dtype):
@@ -185,6 +185,18 @@ def eval_decorator(fn):
         self.train(was_training)
         return out
     return inner
+
+def get_random_sequence_crop(s, length):
+    if len(s) > length:
+        start = random.randint(0, len(s) - length)
+        return s[start : start + length]
+    else:
+        return s
+
+def get_random_sequence_crop_batch(sequence_batch, max_len, min_len=None):
+    if not min_len is None:
+        sequence_batch = list(filter(lambda s: len(s) >= min_len, sequence_batch))
+    return [get_random_sequence_crop(seq, max_len) for seq in sequence_batch]
 
 # maybe typecheck
 
@@ -1484,7 +1496,7 @@ class TransFlow(Module):
 
         self.register_buffer('zero', tensor(0.), persistent = False)
         # for cheap
-        self.encoder_cheap = CHEAP_shorten_1_dim_64()
+        # self.encoder_cheap = CHEAP_shorten_1_dim_64()
     @property
     def device(self):
         return next(self.parameters()).device
@@ -2030,21 +2042,17 @@ class TransFlow(Module):
         tokens = None
         if isinstance(modalities, dict):
             with torch.no_grad():
-                modalities, _ = self.encoder_cheap(modalities['seqres'])
-                # pad and truncate to modality_default_shape
-                # truncate to 256
-                modalities = modalities[:, :256, :] 
-                # pad to 256
-                mask = torch.ones_like(modalities)
-                mask = F.pad(mask, (0, 0, 0, 256 - modalities.shape[1]))
+                # random crop input_res
+                # input_res = get_random_sequence_crop_batch(modalities['seqres'], 256)
+                # modalities, _ = self.encoder_cheap(input_res)
+                emb = modalities['emb']
+                mask = modalities['mask']
                 # Modality tokens (mask[b, j] = 1) can attend to other modality tokens (mask[b, k] = 1)
                 attn_mask = mask.unsqueeze(1) * mask.unsqueeze(2)  # [b, 1, 256] * [b, 256, 1] -> [b, 256, 256]
                 # Convert to boolean
                 attn_mask = attn_mask.bool()
-                modalities = F.pad(modalities, (0, 0, 0, 256 - modalities.shape[1]))
-
-        batch, device = modalities.shape[0], modalities.device
-        tokens = modalities
+        batch, device = emb.shape[0], emb.device
+        tokens = emb
         if not exists(times):
             times = torch.rand((batch,), device = device)
 
@@ -2055,10 +2063,10 @@ class TransFlow(Module):
                 times = times * (1. - velocity_consistency_delta_time) # make sure times are max of 1. - small delta, for velocity consistency
             padded_times = append_dims(times, tokens.ndim - 1)
             noise = torch.randn_like(tokens).to(device)
-            # noised_tokens = padded_times * tokens + (1. - padded_times) * noise
-            # flow = tokens - noise
-            noised_tokens = tokens
-            flow = tokens
+            noised_tokens = padded_times * tokens + (1. - padded_times) * noise
+            flow = tokens - noise
+            noised_tokens = noised_tokens * mask
+            flow = flow * mask
         else:
             noised_tokens = tokens
         # from latent to model tokens
@@ -2094,15 +2102,15 @@ class TransFlow(Module):
 
         # embed = inverse_pack_axial_dims(embed)
 
-        pred_flow = mod.model_to_latent(embed)
+        pred_flow = mod.model_to_latent(embed) * mask
 
         if not return_loss:
             return pred_flow
 
         # flow loss
-
-        flow_loss = F.mse_loss(pred_flow, flow)
-
+        # print(pred_flow.mean(),pred_flow.std())
+        # print(flow.mean(),flow.std())
+        flow_loss = F.mse_loss(pred_flow, flow, reduction='sum')/(mask.sum() * flow.shape[-1])
         # maybe velocity consistency loss
 
         velocity_loss = self.zero
@@ -2124,7 +2132,6 @@ class TransFlow(Module):
 
         # maybe recon loss
 
-        recon_loss = self.zero
         recon = None
         if self.has_recon_loss:
             assert encode_modality
@@ -2157,29 +2164,7 @@ class TransFlow(Module):
         velocity_loss = velocity_loss * self.velocity_consistency_loss_weight 
 
         return recon, (flow_loss, velocity_loss)
-    
-    def split_noise(self, noise: torch.Tensor):
-        """
-        保持顺序拆分 recon，还原 s_z_0 和 s_s_0
 
-        Args:
-            noise: Tensor of shape [B, N, N, 2176]
-
-        Returns:
-            s_s_0: Tensor of shape [B, N, 1024]
-            s_z_0: Tensor of shape [B, N, N, 128]
-        """
-        s_z_0, s_s_i, s_s_j = torch.split(noise, [128, 1024, 1024], dim=-1)
-
-        # s_s_0 是由 s_s_i 或 s_s_j 任意一方向 squeeze 回来的
-        # 注意：此处取 s_s_i 第三维的第0个，或者 s_s_j 的第二维第0个都可以
-        s_s_0_from_i = s_s_i[:, :, 0, :]
-        s_s_0_from_j = s_s_j[:, 0, :, :]
-
-        # assert torch.allclose(s_s_0_from_i, s_s_0_from_j), "s_s_i and s_s_j do not match!"
-
-        return s_s_0_from_i, s_z_0
-    
     @torch.no_grad()
     @eval_decorator
     @typecheck
