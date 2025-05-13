@@ -1,6 +1,17 @@
-torch-2.5.0
-triton-3.1.0 
-pytorch-lightning-2.0.4
-deepspeed-0.16.5
-transformers-4.51.2
-openfold-1.0.1
+triton==3.1.0 
+deepspeed==0.16.5
+pytorch-lightning==2.0.4
+transformers==4.51.2
+# openfold==1.0.1
+axial-positional-embedding>=0.3.5
+beartype
+einx>=0.3.0
+einops>=0.8.0
+ema-pytorch
+hyper-connections>=0.0.10
+jaxtyping
+loguru
+
+torchdiffeq
+torch>=2.0
+tqdm

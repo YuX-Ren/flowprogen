@@ -175,14 +175,14 @@ class ModelWrapper(pl.LightningModule):
 
             #     # added by hwxiao, use default log()
             #     for k, v in loss_breakdown.items():
-            #         self.log(f'{self.stage}/'+k, v.item(), prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
+            #         self.log(f'{self.stage}_'+k, v.item(), prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
             #     for k, v in metrics.items():
-            #         self.log(f'{self.stage}/'+k, v.item(), prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
+            #         self.log(f'{self.stage}_'+k, v.item(), prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
 
-            self.log(f'{self.stage}/flow_loss', flow_loss.item(), prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
-            self.log(f'{self.stage}/velocity_loss', velocity_loss.item(), prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
+            self.log(f'{self.stage}_flow_loss', flow_loss.item(), prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
+            self.log(f'{self.stage}_velocity_loss', velocity_loss.item(), prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
         
-            self.log(f'{self.stage}/dur', time.time() - self.last_log_time, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
+            self.log(f'{self.stage}_dur', time.time() - self.last_log_time, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch_size, sync_dist=True)
             self.last_log_time = time.time()
             if outputs:
                 total_loss = loss + flow_loss + velocity_loss
@@ -191,58 +191,16 @@ class ModelWrapper(pl.LightningModule):
             return total_loss
 
     def validation_step(self, batch, batch_idx):
-        pass
-        batch_size = batch['aatype'].shape[0]
-        if not self.args.no_ema:
-            if(self.cached_weights is None):
-                self.load_ema_weights()
-            
-        if self.args.normal_validate:
-            self.training_step(batch, batch_idx, 'val')
-            if self.args.validate:
-                self.try_print_log()
-            return 
+        # if self.args.normal_validate:
+            # self.training_step(batch, batch_idx, 'val')
+            # if self.args.validate:
+            #     self.try_print_log()
+            # return 
             
         self.iter_step += 1
         self.stage = 'val'
         # At the start of validation, load the EMA weights
-        ref_prot = batch['ref_prot'][0]
-        
-        pred_prots = []
-        for _ in range(self.args.val_samples):
-            if self.args.distillation:
-                # prots = self.inference(batch, no_diffusion=True, noisy_first=True, as_protein=True)
-                prots = self.inference(batch, as_protein=True, fixed_modality_shape=(len(ref_prot.seqres),), modality_steps=1, no_flow=True)
-            else:
-                prots = self.inference(batch, as_protein=True, fixed_modality_shape=(len(ref_prot.seqres),), modality_steps=1)
-            pred_prots.append(prots[-1])
-
-        first_metrics = protein.global_metrics(ref_prot, prots[0])
-        for key in first_metrics:
-            self.log(f'{self.stage}/first_ref_'+key, first_metrics[key], prog_bar=True, on_step=False, on_epoch=True, batch_size=batch_size, sync_dist=True)
-
-        ref_metrics = []
-        for pred_prot in pred_prots:
-            ref_metrics.append(protein.global_metrics(ref_prot, pred_prot, lddt=True))
-
         self_metrics = []
-        for i, pred_prot1 in enumerate(pred_prots):
-            pred_prot2 = pred_prots[(i+1) % len(pred_prots)]
-            self_metrics.append(protein.global_metrics(pred_prot1, pred_prot2, lddt=True))
-        
-        name_hash = hash(', '.join(batch['name']))
-        self.log(f'{self.stage}/name', float(name_hash), batch_size=batch_size, sync_dist=True)
-        
-        ref_metrics = pd.DataFrame(ref_metrics)
-        for key in ref_metrics:
-            self.log(f'{self.stage}/mean_ref_'+key, ref_metrics[key].mean(), prog_bar=True, on_step=False, on_epoch=True, batch_size=batch_size, sync_dist=True)
-            self.log(f'{self.stage}/max_ref_'+key, ref_metrics[key].max(), prog_bar=True, on_step=False, on_epoch=True, batch_size=batch_size, sync_dist=True) 
-            self.log(f'{self.stage}/min_ref_'+key, ref_metrics[key].min(), prog_bar=True, on_step=False, on_epoch=True, batch_size=batch_size, sync_dist=True) 
-        
-        self_metrics = pd.DataFrame(self_metrics)
-        for key in self_metrics:
-            self.log(f'{self.stage}/self_'+key, self_metrics[key].mean(), prog_bar=True, on_step=False, on_epoch=True, batch_size=batch_size, sync_dist=True)
-        
         if self.args.validate:
             self.try_print_log()
 
@@ -290,10 +248,10 @@ class ModelWrapper(pl.LightningModule):
             except:
                 rank_zero_info('Loading teacher model failed, this is expected at distilled inference-time')                
             
-        rank_zero_info('Loading EMA state dict')
-        if not self.args.no_ema:
-            ema = checkpoint["ema"]
-            self.ema.load_state_dict(ema)
+        # rank_zero_info('Loading EMA state dict')
+        # if not self.args.no_ema:
+        #     ema = checkpoint["ema"]
+        #     self.ema.load_state_dict(ema)
 
     def on_save_checkpoint(self, checkpoint):
         if self.cached_weights is not None:
@@ -326,7 +284,7 @@ class ModelWrapper(pl.LightningModule):
     def on_train_epoch_end(self):
         train_log = {}
         for k, v in self.trainer.logged_metrics.items():
-            if k.startswith('train/'):
+            if k.startswith('train_'):
                 if isinstance(v, torch.Tensor):
                     train_log[k] = v.detach().cpu().numpy().tolist()
                 else:
@@ -338,20 +296,30 @@ class ModelWrapper(pl.LightningModule):
             'step': self.trainer.global_step
         })
         
-        if self.trainer.is_global_zero:
-            rank_zero_info(f"Train metrics: {train_log}")
+        # if self.trainer.is_global_zero:
+        #     rank_zero_info(f"Train metrics: {train_log}")
             
-            if self.args.wandb:
-                wandb.log(train_log)
+        #     if self.args.wandb:
+        #         wandb.log(train_log)
                 
-            path = os.path.join(
-                os.environ["MODEL_DIR"], f"train_{self.trainer.current_epoch}.csv"
-            )
-            pd.DataFrame([train_log]).to_csv(path, index=False)
+        #     # Either use a unique filename with epoch number
+        #     path = os.path.join(
+        #         os.environ["MODEL_DIR"], f"metrics.csv"
+        #     )
+        #     pd.DataFrame([train_log]).to_csv(path, index=False)
             
+        #     # Or append to existing file
+        #     metrics_path = os.path.join(os.environ["MODEL_DIR"], "metrics.csv")
+        #     if os.path.exists(metrics_path):
+        #         df = pd.read_csv(metrics_path)
+        #         df = pd.concat([df, pd.DataFrame([train_log])], ignore_index=True)
+        #         df.to_csv(metrics_path, index=False)
+        #     else:
+        #         pd.DataFrame([train_log]).to_csv(metrics_path, index=False)
+                
     def on_validation_epoch_end(self):
-        if not self.args.no_ema:
-            self.restore_cached_weights()
+        # if not self.args.no_ema:
+            # self.restore_cached_weights()
             
         # Get validation metrics from Lightning's callback metrics
         # which are collected during validation_step
@@ -367,16 +335,16 @@ class ModelWrapper(pl.LightningModule):
         val_log = gather_log(val_log, self.trainer.world_size)
         val_log = get_log_mean(val_log)
 
-        if self.trainer.is_global_zero:
-            rank_zero_info(f"Validation metrics: {val_log}")
+        # if self.trainer.is_global_zero:
+        #     rank_zero_info(f"Validation metrics: {val_log}")
             
-            if self.args.wandb:
-                wandb.log(val_log)
+        #     if self.args.wandb:
+        #         wandb.log(val_log)
 
-            path = os.path.join(
-                os.environ["MODEL_DIR"], f"val_{self.trainer.current_epoch}.csv"
-            )
-            pd.DataFrame([val_log]).to_csv(path, index=False)
+        #     path = os.path.join(
+        #         os.environ["MODEL_DIR"], f"val_{self.trainer.current_epoch}.csv"
+        #     )
+        #     pd.DataFrame([val_log]).to_csv(path, index=False)
 
     def on_before_optimizer_step(self, optimizer):
         self.try_print_log()
@@ -408,25 +376,15 @@ class ModelWrapper(pl.LightningModule):
         Returns:
             Generated modality samples
         """
-        if no_flow:
-            s_s_0 = self.model.modality_encoder[0].get_encoder_outputs(batch)
-            samples = self.model.modality_decoder[0].get_decoder_outputs(s_s_0, batch)
-        else:
-            # Generate samples using the model
-            samples = self.model.generate_modality_only(
-                batch,
-                batch_size=batch_size,
-                modality_type=modality_type,
-                fixed_modality_shape=fixed_modality_shape,  #the real length of the generated sequence
-                modality_steps=modality_steps,
-                return_unprocessed_modalities=return_unprocessed_modalities
-            )
-
-        if as_protein:
-            prots = protein.output_to_protein(samples)
-            return prots
-        else:
-            return samples
+        samples = self.model.generate_modality_only(
+            batch,
+            batch_size=batch_size,
+            modality_type=modality_type,
+            fixed_modality_shape=fixed_modality_shape,  #the real length of the generated sequence
+            modality_steps=modality_steps,
+            return_unprocessed_modalities=return_unprocessed_modalities
+        )
+        return samples
         
     def _compute_validation_metrics(self, 
         batch, 

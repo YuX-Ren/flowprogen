@@ -105,7 +105,6 @@ class OpenFoldSingleDataset(torch.utils.data.Dataset):
         self.treat_pdb_as_distillation = treat_pdb_as_distillation
         self.mode = mode
         self.pdb_chains = pdb_chains
-        logger.info(f"Initializing {mode} dataset with {len(self.pdb_chains)} entries")
         self._output_raw = _output_raw
         self._structure_index = _structure_index
 

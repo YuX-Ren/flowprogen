@@ -68,28 +68,27 @@ def main(args):
 
     is_global_zero = not dist.is_initialized() or dist.get_rank() == 0
 
-    pdb_chains = pd.read_csv(args.pdb_chains, index_col='name')
+    # pdb_chains = pd.read_csv(args.pdb_chains, index_col='name')
 
-    if args.filter_chains:
-        clusters = load_clusters(args.pdb_clusters)
-        pdb_chains = pdb_chains.join(clusters)
-        pdb_chains = pdb_chains[pdb_chains.release_date < args.train_cutoff]
+    # if args.filter_chains:
+    #     clusters = load_clusters(args.pdb_clusters)
+    #     pdb_chains = pdb_chains.join(clusters)
+    #     pdb_chains = pdb_chains[pdb_chains.release_date < args.train_cutoff]
     
     trainset = SequenceSingleDataset_v2(
         data_dir = args.train_data_dir,
         alignment_dir = args.train_msa_dir,
-        pdb_chains = pdb_chains,
+        pdb_chains = None,
         config = data_cfg,
         mode = 'train',
         subsample_pos = args.sample_train_confs,
         first_as_template = args.first_as_template,
     )
     if args.normal_validate:
-        val_pdb_chains = pd.read_csv(args.val_csv, index_col='name')
         valset = SequenceSingleDataset_v2(
             data_dir = args.train_data_dir,
             alignment_dir = args.train_msa_dir,
-            pdb_chains = val_pdb_chains,
+            pdb_chains = None,
             config = data_cfg,
             mode = 'train',
             subsample_pos = args.sample_val_confs,
@@ -123,6 +122,7 @@ def main(args):
         pin_memory=True,
         shuffle=True,
         collate_fn=OpenFoldBatchCollator(),
+        drop_last=True
     )
 
     if args.wandb and is_global_zero:
@@ -144,16 +144,34 @@ def main(args):
         max_epochs=args.epochs,
         limit_train_batches=args.limit_batches or 1.0,
         limit_val_batches=args.limit_batches or 1.0,
-        num_sanity_val_steps=0,
+        # num_sanity_val_steps=0,
         enable_progress_bar=True,
         gradient_clip_val=args.grad_clip,
-        callbacks=[ModelCheckpoint(
-            dirpath=os.environ["MODEL_DIR"], 
-            save_top_k=1,
-            monitor='val/min_ref_rmsd',
-            mode='min',
-            every_n_epochs=args.ckpt_freq,
-        )],
+        callbacks=[
+            # Save checkpoint every N epochs
+            ModelCheckpoint(
+                dirpath=os.environ["MODEL_DIR"],
+                filename="{epoch:03d}",
+                every_n_epochs=args.ckpt_freq,
+                save_last=False,  # Let the other callback handle this
+                save_top_k=-1,
+            ),
+            # "last" checkpoint handler
+            ModelCheckpoint(
+                dirpath=os.environ["MODEL_DIR"],
+                filename="last",
+                save_last=True,
+                every_n_epochs=1,  # Check every epoch to update "last"
+            ),
+            # Save best model based on training flow loss
+            ModelCheckpoint(
+                dirpath=os.environ["MODEL_DIR"],
+                save_top_k=5,
+                monitor="train_flow_loss_epoch",  # Use the training flow loss metric
+                mode="min",  # We want to minimize the loss
+                filename="{epoch:03d}-{train_flow_loss_epoch:.4f}.ckpt"
+            )
+        ],
         accumulate_grad_batches=args.accumulate_grad,
         check_val_every_n_epoch=args.val_freq,
         logger=wandb_logger,
@@ -229,7 +247,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--train_epoch_len", type=int, default=40000)
     parser.add_argument("--limit_batches", type=int, default=None)
-    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--batch_size", type=int, default=32)
 
     ## Optimization settings
     parser.add_argument("--num_workers", type=int, default=8)
@@ -269,7 +287,7 @@ if __name__ == "__main__":
     ## Logging args
     parser.add_argument("--print_freq", type=int, default=100)
     parser.add_argument("--val_freq", type=int, default=1)
-    parser.add_argument("--ckpt_freq", type=int, default=1)
+    parser.add_argument("--ckpt_freq", type=int, default=5)
     parser.add_argument("--wandb", action='store_true')
     parser.add_argument("--run_name", type=str, default="default")
     

@@ -2224,9 +2224,9 @@ class TransFlow(Module):
         # decode
 
       
-        if exists(mod.decoder):
-            mod.decoder.eval()
-            sampled_modality = mod.decoder.get_decoder_outputs(sampled_modality, batch)
+        # if exists(mod.decoder):
+        #     mod.decoder.eval()
+        #     sampled_modality = mod.decoder.get_decoder_outputs(sampled_modality, batch)
 
         return sampled_modality
 
