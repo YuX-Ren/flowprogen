@@ -5,7 +5,7 @@ from ml_collections.config_dict import config_dict
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--mode', choices=['transflow', 'llmflow'], default='transflow')
-parser.add_argument('--samples', type=int, default=10)
+parser.add_argument('--samples', type=int, default=1)
 parser.add_argument('--steps', type=int, default=10)
 parser.add_argument('--outpdb', type=str, default='./outpdb/default')
 parser.add_argument('--weights', type=str, default=None)
@@ -83,15 +83,16 @@ def main():
     os.makedirs(args.outpdb, exist_ok=True)
     runtime = defaultdict(list)
     decode_latent = DecodeLatent()
-    for i in range(args.samples):
-        result = []
-        batch = None
-        for j in tqdm.trange(args.samples):
-            latents = model.inference(batch, fixed_modality_shape=(args.sample_len,),  modality_steps=args.flow_steps, as_protein=False, no_flow=False)
-            print(latents.shape)
-            seq_strs, pdb_strs = decode_latent.run(latents)
-        print(seq_strs,pdb_strs)
-
+    result = []
+    batch = None
+    for j in tqdm.trange(args.samples):
+        latents = model.inference(batch, fixed_modality_shape=(args.sample_len,),  modality_steps=args.flow_steps, as_protein=False, no_flow=False)
+        print(latents.shape)
+        seq_strs, pdb_strs = decode_latent.run(latents)
+    # print(seq_strs,pdb_strs)
+    for i in range(len(pdb_strs)):
+        with open(f'test_{i}.pdb', 'w') as f:
+            f.write(pdb_strs[i])
 
     if args.runtime_json:
         with open(args.runtime_json, 'w') as f:

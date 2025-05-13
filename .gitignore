@@ -173,3 +173,4 @@ alignment_dir
 predict_pdb*
 *.ckpt
 pdb_mmcif*.csv
+*.pt

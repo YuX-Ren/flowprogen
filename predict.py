@@ -1,8 +1,5 @@
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument('--input_csv', type=str, default='splits/transporters_only.csv')
-parser.add_argument('--templates_dir', type=str, default=None)
-parser.add_argument('--msa_dir', type=str, default='./alignment_dir')
 parser.add_argument('--mode', choices=['transflow', 'llmflow'], default='transflow')
 parser.add_argument('--samples', type=int, default=10)
 parser.add_argument('--steps', type=int, default=10)
@@ -31,7 +28,6 @@ from flowprogen.data.data_modules import collate_fn
 from flowprogen.model.wrapper import TransFlowWrapper, LLMFlowWrapper
 from flowprogen.utils.tensor_utils import tensor_tree_map
 import flowprogen.utils.protein as protein
-from flowprogen.data.inference import AlphaFoldCSVDataset, CSVDataset
 from collections import defaultdict
 from openfold.utils.import_weights import import_jax_weights_
 from flowprogen.config import model_config
@@ -57,9 +53,6 @@ data_cfg = config.data
 data_cfg.common.use_templates = False
 data_cfg.common.max_recycling_iters = 0
 
-if args.subsample: # https://elifesciences.org/articles/75751#s3
-    data_cfg.predict.max_msa_clusters = args.subsample // 2
-    data_cfg.predict.max_extra_msa = args.subsample
 
 @torch.no_grad()
 def main():

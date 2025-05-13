@@ -7,11 +7,11 @@
 gpu_count=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
 
 TORCH_COMPILE=0 torchrun --nproc_per_node=$gpu_count train_seq_cheap.py \
-    --val_freq 1000 \
+    --val_freq 1 \
     --lr 5e-4 \
     --epochs 10000 \
     --train_epoch_len 1000 \
-    --train_data_dir /share/project/xiaohongwang/Datasets/pdb_mmcif_data_npz/seq_only/ \
+    --train_data_dir ./data \
     --mode transflow \
     --run_name transflow_seq_only \
     --print_freq 1000 \

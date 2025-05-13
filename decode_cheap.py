@@ -133,7 +133,7 @@ class DecodeLatent:
         print("Decompressing latent samples")
         start = time.time()
         x_processed = self.process_x(x)
-        del self.hourglass  # free up memory
+        # del self.hourglass  # free up memory
         end = time.time()
         # with open(self.time_log_path, "w") as f:
         #     f.write(f"Decompress time: {end - start:.2f} seconds.\n")
@@ -144,7 +144,7 @@ class DecodeLatent:
         # headers = [f"sample{i}" for i in range(len(seq_strs))]
         # self.write_sequences_to_disk(seq_strs, "sequences.fasta", headers=headers)
 
-        del self.sequence_constructor  # free up memory
+        # del self.sequence_constructor  # free up memory
         end = time.time()
         # with open(self.time_log_path, "a") as f:
         #     f.write(f"Sequence construction time: {end - start:.2f} seconds.\n")
